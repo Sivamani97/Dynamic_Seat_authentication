@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import {
   ShieldAlert,
@@ -21,6 +21,7 @@ import {
 
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeRole, setActiveRole] = useState<"USER" | "STAFF" | "ADMIN">("USER");
 
@@ -34,18 +35,19 @@ export function Navbar() {
   const switchRole = (role: "USER" | "STAFF" | "ADMIN") => {
     setActiveRole(role);
     localStorage.setItem("smartseat_role", role);
+    if (role === "USER") router.push("/user");
+    if (role === "STAFF") router.push("/user/staff");
+    if (role === "ADMIN") router.push("/admin");
   };
 
   const navLinks = [
     { href: "/demo", label: "2-Min Demo", icon: PlayCircle, highlight: true },
+    { href: "/user", label: "Passenger (/user)", icon: Smartphone },
+    { href: "/reader", label: "QR Reader (/reader)", icon: QrCode },
+    { href: "/user/staff", label: "Staff Map (/user/staff)", icon: ShieldAlert },
+    { href: "/admin", label: "Admin Module (/admin)", icon: LayoutDashboard },
     { href: "/events", label: "Events & Seats", icon: Ticket },
-    { href: "/tickets", label: "My Tickets", icon: UserCheck },
-    { href: "/reader", label: "QR Reader", icon: QrCode },
-    { href: "/staff", label: "Staff Map", icon: ShieldAlert },
-    { href: "/staff/scan", label: "Gate Scanner", icon: DoorOpen },
     { href: "/seat-unit/SCREEN2-A12", label: "Seat Unit A12", icon: Tv },
-    { href: "/admin", label: "Admin Console", icon: LayoutDashboard },
-    { href: "/local-alert", label: "PWA Receiver", icon: Radio },
   ];
 
   return (
