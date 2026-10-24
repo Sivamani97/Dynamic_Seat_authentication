@@ -54,16 +54,16 @@ export default function HomePage() {
       cta: "Open Live Staff Map",
     },
     {
-      title: "Entry Gate Scanner",
-      tag: "Phone Camera",
+      title: "QR Reader & Ticket Validator",
+      tag: "Hardware Alternative",
       tagColor: "bg-blue-500/20 text-blue-300 border-blue-500/40",
       description:
-        "Turn any mobile phone into a gate scanner. Uses html5-qrcode for instant dynamic token verification, signature checks, clock skew tolerance, and nonce replay rejection.",
-      href: "/staff/scan",
+        "Dedicated reader interface acting as the software alternative to physical scanners. Validates the 30s dynamic QR at gate turnstiles or seat units via camera or instant 1-click token verification.",
+      href: "/reader",
       icon: QrCode,
       gradient: "from-blue-500/10 via-cyan-500/5 to-transparent",
       borderColor: "hover:border-blue-500/50",
-      cta: "Open Gate Scanner",
+      cta: "Open QR Reader Page",
     },
     {
       title: "Virtual Seat Unit",
@@ -129,7 +129,14 @@ export default function HomePage() {
             className="px-6 py-3 rounded-xl bg-slate-900 text-slate-200 border border-slate-700 hover:border-slate-500 hover:bg-slate-800 font-semibold text-sm transition-all flex items-center gap-2"
           >
             <Smartphone className="w-4 h-4 text-indigo-400" />
-            View Pre-Seeded Dynamic Ticket (A12)
+            Passenger Ticket (30s QR)
+          </Link>
+          <Link
+            href="/reader"
+            className="px-6 py-3 rounded-xl bg-slate-900 text-slate-200 border border-slate-700 hover:border-purple-500 hover:bg-slate-800 font-semibold text-sm transition-all flex items-center gap-2"
+          >
+            <QrCode className="w-4 h-4 text-purple-400" />
+            QR Reader & Validator
           </Link>
         </div>
       </div>

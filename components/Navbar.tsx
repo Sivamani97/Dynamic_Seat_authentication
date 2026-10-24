@@ -16,6 +16,7 @@ import {
   UserCheck,
   QrCode,
   Radio,
+  DoorOpen,
 } from "lucide-react";
 
 export function Navbar() {
@@ -39,9 +40,9 @@ export function Navbar() {
     { href: "/demo", label: "2-Min Demo", icon: PlayCircle, highlight: true },
     { href: "/events", label: "Events & Seats", icon: Ticket },
     { href: "/tickets", label: "My Tickets", icon: UserCheck },
-    { href: "/outbox", label: "Email Outbox", icon: Mail },
+    { href: "/reader", label: "QR Reader", icon: QrCode },
     { href: "/staff", label: "Staff Map", icon: ShieldAlert },
-    { href: "/staff/scan", label: "Gate Scanner", icon: QrCode },
+    { href: "/staff/scan", label: "Gate Scanner", icon: DoorOpen },
     { href: "/seat-unit/SCREEN2-A12", label: "Seat Unit A12", icon: Tv },
     { href: "/admin", label: "Admin Console", icon: LayoutDashboard },
     { href: "/local-alert", label: "PWA Receiver", icon: Radio },
