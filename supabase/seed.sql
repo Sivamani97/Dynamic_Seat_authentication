@@ -120,7 +120,7 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- 5. Initialize Seat States for Event 'Movie XYZ'
-INSERT INTO public.seat_states (seat_id, event_id, occupancy, authorization, state, pressure)
+INSERT INTO public.seat_states (seat_id, event_id, occupancy, "authorization", state, pressure)
 SELECT s.id, 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', 'EMPTY', 'UNAUTHORIZED', 'NORMAL', 0
 FROM public.seats s
 WHERE s.screen_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'

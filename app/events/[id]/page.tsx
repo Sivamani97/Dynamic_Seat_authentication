@@ -45,40 +45,71 @@ export default function EventSeatMapPage({
   // Generate 5 rows (A to E) x 12 columns
   const [seats, setSeats] = useState<SeatModel[]>([]);
 
+  const targetEventId =
+    eventId && eventId.length === 36 ? eventId : "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+
   useEffect(() => {
-    // Generate Screen 2 Seat Map
-    const generatedSeats: SeatModel[] = [];
-    const rows = ["A", "B", "C", "D", "E"];
+    let isMounted = true;
+    async function loadSeats() {
+      try {
+        const res = await fetch(`/api/events/${targetEventId}/seats`);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.seats && data.seats.length > 0) {
+            setSeats(data.seats);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to fetch seats from API, using deterministic seats", e);
+      }
 
-    rows.forEach((r) => {
-      for (let c = 1; c <= 12; c++) {
-        const label = `${r}${c}`;
-        const unitId = `SCREEN2-${label}`;
-        const isVip = r === "D" || r === "E";
-        // Pre-booked seat A12 for user 1 demo
-        const isPrebooked = label === "A12" || label === "B4";
+      // Deterministic valid UUID fallback
+      const generatedSeats: SeatModel[] = [];
+      const rows = ["A", "B", "C", "D", "E"];
 
-        generatedSeats.push({
-          id:
+      rows.forEach((r) => {
+        for (let c = 1; c <= 12; c++) {
+          const label = `${r}${c}`;
+          const unitId = `SCREEN2-${label}`;
+          const isVip = r === "D" || r === "E";
+          const isPrebooked = label === "A12" || label === "B4";
+          const rHex = r.charCodeAt(0).toString(16).padStart(4, "0");
+          const cHex = c.toString(16).padStart(12, "0");
+          const deterministicId =
             label === "A12"
               ? "a1200000-0000-0000-0000-000000000a12"
               : label === "A13"
               ? "a1300000-0000-0000-0000-000000000a13"
-              : `seat-${label.toLowerCase()}`,
-          label,
-          row: r,
-          col: c,
-          type: isVip ? "VIP" : "STANDARD",
-          price: isVip ? 22.5 : 16.0,
-          unit_id: unitId,
-          isBooked: isPrebooked,
-        });
-      }
-    });
+              : label === "B4"
+              ? "b0400000-0000-0000-0000-000000000b04"
+              : `00000000-${rHex}-0000-0000-${cHex}`;
 
-    setSeats(generatedSeats);
-    setLoading(false);
-  }, []);
+          generatedSeats.push({
+            id: deterministicId,
+            label,
+            row: r,
+            col: c,
+            type: isVip ? "VIP" : "STANDARD",
+            price: isVip ? 22.5 : 16.0,
+            unit_id: unitId,
+            isBooked: isPrebooked,
+          });
+        }
+      });
+
+      if (isMounted) {
+        setSeats(generatedSeats);
+        setLoading(false);
+      }
+    }
+
+    loadSeats();
+    return () => {
+      isMounted = false;
+    };
+  }, [targetEventId]);
 
   // 120s Hold Timer countdown
   useEffect(() => {
@@ -108,7 +139,7 @@ export default function EventSeatMapPage({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          eventId: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+          eventId: targetEventId,
           seatId: seat.id,
         }),
       });
@@ -143,7 +174,7 @@ export default function EventSeatMapPage({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          eventId: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+          eventId: targetEventId,
           seatId: selectedSeat.id,
           userEmail: "user1@demo.com",
         }),

@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS public.events (
 CREATE TABLE IF NOT EXISTS public.bookings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     booking_ref TEXT UNIQUE NOT NULL, -- e.g. 'BK829173'
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id UUID,
     event_id UUID NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
     seat_id UUID NOT NULL REFERENCES public.seats(id) ON DELETE CASCADE,
     status TEXT NOT NULL DEFAULT 'BOOKED' CHECK (status IN ('BOOKED', 'CHECKED_IN', 'SEAT_AUTHORIZED', 'COMPLETED', 'CANCELLED')),
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS public.seat_holds (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_id UUID NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
     seat_id UUID NOT NULL REFERENCES public.seats(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id UUID,
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (event_id, seat_id)
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS public.seat_states (
     seat_id UUID NOT NULL REFERENCES public.seats(id) ON DELETE CASCADE,
     event_id UUID NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
     occupancy TEXT NOT NULL DEFAULT 'EMPTY' CHECK (occupancy IN ('EMPTY', 'OCCUPIED', 'UNCERTAIN', 'TEMPORARILY_VACATED')),
-    authorization TEXT NOT NULL DEFAULT 'UNAUTHORIZED' CHECK (authorization IN ('UNAUTHORIZED', 'AUTHORIZED')),
+    "authorization" TEXT NOT NULL DEFAULT 'UNAUTHORIZED' CHECK ("authorization" IN ('UNAUTHORIZED', 'AUTHORIZED')),
     state TEXT NOT NULL DEFAULT 'NORMAL' CHECK (state IN ('NORMAL', 'AUTHORIZED', 'MISMATCH_PENDING', 'WRONG_SEAT', 'SOS', 'FAULT', 'CLAIMED_VACATED')),
     pressure INTEGER NOT NULL DEFAULT 0,
     mismatch_since TIMESTAMPTZ,

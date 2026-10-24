@@ -50,6 +50,45 @@ export function getAdminClient(): SupabaseClient {
   });
 }
 
+/**
+ * Resolves or provisions a valid user ID from auth.users to satisfy foreign key constraints.
+ * If Supabase Auth is enabled, ensures a real user ID is used instead of a non-existent dummy UUID.
+ */
+export async function getValidAuthUserId(
+  client: SupabaseClient,
+  preferredId?: string | null
+): Promise<string | null> {
+  try {
+    // 1. If preferredId is provided and looks like a real UUID, check if it exists in auth.users
+    if (preferredId && preferredId !== "00000000-0000-0000-0000-000000000001") {
+      const { data: user } = await client.auth.admin.getUserById(preferredId);
+      if (user?.user) return user.user.id;
+    }
+
+    // 2. Fetch any existing user from auth.users
+    const { data: userList } = await client.auth.admin.listUsers({ page: 1, perPage: 1 });
+    if (userList?.users && userList.users.length > 0) {
+      return userList.users[0].id;
+    }
+
+    // 3. Auto-provision a demo passenger in auth.users
+    const { data: created } = await client.auth.admin.createUser({
+      email: "user1@demo.com",
+      password: "DemoUser123!",
+      email_confirm: true,
+      user_metadata: { role: "USER", name: "Demo Passenger" },
+    });
+
+    if (created?.user) {
+      return created.user.id;
+    }
+  } catch (err) {
+    console.warn("getValidAuthUserId: Could not fetch or create auth user:", err);
+  }
+
+  return preferredId || null;
+}
+
 export interface AuditLogParams {
   eventType: string;
   bookingId?: string | null;

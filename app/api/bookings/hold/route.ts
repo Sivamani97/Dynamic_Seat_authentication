@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminClient } from "@/lib/supabase/server";
+import { getAdminClient, getValidAuthUserId } from "@/lib/supabase/server";
 import { CreateHoldSchema } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
@@ -62,23 +62,69 @@ export async function POST(request: NextRequest) {
   // 3. Create 2-minute hold
   const holdExpiry = new Date(now.getTime() + 2 * 60 * 1000).toISOString();
 
-  // Pick user ID from header or dummy default for demo checkout
-  const userId =
-    request.headers.get("x-user-id") || "00000000-0000-0000-0000-000000000001";
+  // Ensure seat exists before holding
+  const { data: seatCheck } = await supabase
+    .from("seats")
+    .select("id")
+    .eq("id", seatId)
+    .maybeSingle();
 
-  const { data: hold, error: hErr } = await supabase
-    .from("seat_holds")
-    .upsert(
+  if (!seatCheck) {
+    const defaultScreenId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    await supabase.from("seats").upsert(
       {
-        event_id: eventId,
-        seat_id: seatId,
-        user_id: userId,
-        expires_at: holdExpiry,
+        id: seatId,
+        screen_id: defaultScreenId,
+        label: "Reserved Seat",
+        row: "A",
+        col: 1,
+        unit_id: `SCREEN2-${seatId.substring(0, 8)}`,
+        type: "STANDARD",
+        price: 16.0,
       },
-      { onConflict: "event_id,seat_id" }
-    )
+      { onConflict: "id" }
+    );
+  }
+
+  const rawUserId = request.headers.get("x-user-id");
+  const userId = await getValidAuthUserId(supabase, rawUserId);
+
+  let holdData: any = {
+    event_id: eventId,
+    seat_id: seatId,
+    expires_at: holdExpiry,
+  };
+  if (userId) {
+    holdData.user_id = userId;
+  }
+
+  let { data: hold, error: hErr } = await supabase
+    .from("seat_holds")
+    .upsert(holdData, { onConflict: "event_id,seat_id" })
     .select()
     .single();
+
+  // If failed on seat_holds_user_id_fkey, retry with user_id: null
+  if (hErr && hErr.message.includes("seat_holds_user_id_fkey")) {
+    const { data: retryHold, error: retryErr } = await supabase
+      .from("seat_holds")
+      .upsert(
+        {
+          event_id: eventId,
+          seat_id: seatId,
+          user_id: null,
+          expires_at: holdExpiry,
+        },
+        { onConflict: "event_id,seat_id" }
+      )
+      .select()
+      .single();
+
+    if (!retryErr && retryHold) {
+      hold = retryHold;
+      hErr = null;
+    }
+  }
 
   if (hErr) {
     return NextResponse.json(

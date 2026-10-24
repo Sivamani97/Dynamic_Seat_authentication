@@ -335,12 +335,16 @@ export default function DynamicQrReaderPage() {
           <span className="text-[11px] text-slate-400">Point at passenger&apos;s phone screen</span>
         </div>
 
-        <div
-          id={qrRegionId}
-          className="w-full min-h-[250px] rounded-2xl bg-black/80 border border-slate-700/80 overflow-hidden flex items-center justify-center text-slate-500 text-xs text-center p-4"
-        >
+        <div className="relative w-full min-h-[250px] rounded-2xl bg-black/80 border border-slate-700/80 overflow-hidden flex items-center justify-center text-slate-500 text-xs text-center">
+          {/* Empty dedicated region for html5-qrcode DOM operations */}
+          <div
+            id={qrRegionId}
+            className={`w-full ${scanning ? "block" : "hidden"}`}
+          />
+
+          {/* Sibling React element - safe from DOM mutation by external library */}
           {!scanning && (
-            <div className="space-y-3">
+            <div className="p-6 space-y-3 pointer-events-none">
               <Camera className="w-10 h-10 mx-auto text-slate-600" />
               <p>Camera is currently idle. Click below to start scanning.</p>
             </div>
