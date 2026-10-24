@@ -1,0 +1,44 @@
+name: SmartSeat CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Lint, Test, Typecheck & Build
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://dummy-project.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy_anon_key_for_ci_pipeline
+      SUPABASE_SERVICE_ROLE_KEY: dummy_service_role_key_for_ci_pipeline
+      TOKEN_SIGNING_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      CRON_SECRET: ci-cron-secret-12345
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Vitest Unit Tests
+        run: npm run test
+
+      - name: Run End-to-End Scenarios Security Suite
+        run: npm run test:scenarios
+
+      - name: TypeScript Typecheck
+        run: npm run typecheck
+
+      - name: Next.js Production Build
+        run: npm run build
