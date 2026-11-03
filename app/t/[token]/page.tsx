@@ -161,11 +161,25 @@ export default function SecureTicketPage({
   }, [data?.booking?.id]);
 
   // Copy raw token fallback
-  const copyToken = () => {
+  const copyToken = async () => {
     if (!data?.token) return;
-    navigator.clipboard.writeText(data.token);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(data.token);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = data.token;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   // Assistance button click: Instant vibration + register

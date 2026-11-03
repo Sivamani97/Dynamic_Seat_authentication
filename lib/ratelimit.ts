@@ -73,7 +73,7 @@ export async function checkRateLimit(
       .from("rate_limits")
       .select("key, count, reset_at")
       .eq("key", identifier)
-      .single();
+      .maybeSingle();
 
     if (!existing || new Date(existing.reset_at) < now) {
       // First hit or window expired: reset counter

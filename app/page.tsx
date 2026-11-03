@@ -30,64 +30,88 @@ export default function HomePage() {
       cta: "Launch Interactive Demo",
     },
     {
-      title: "Passenger Portal (/user)",
-      tag: "Display 1: Mobile-First",
+      title: "Dynamic QR Generator",
+      tag: "Mobile Pass",
       tagColor: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
       description:
-        "Dedicated passenger display. View 30-second regenerating dynamic tickets with animated SVG countdown rings, seat awareness status, checkout holds, and in-app emergency SOS.",
-      href: "/user",
-      icon: Smartphone,
+        "Dedicated mobile QR generation page. Renders the rotating 30-second HMAC-SHA256 dynamic ticket with visual countdown timer, replay nonce shield, and high-brightness scanning mode.",
+      href: "/qr/generate",
+      icon: QrCode,
       gradient: "from-indigo-500/10 via-purple-500/5 to-transparent",
       borderColor: "hover:border-indigo-500/50",
-      cta: "Open Passenger Portal (/user)",
+      cta: "Open QR Generator",
     },
     {
-      title: "Staff Command Center (/user/staff)",
-      tag: "Display 2: Realtime Map",
-      tagColor: "bg-amber-500/20 text-amber-300 border-amber-500/40",
-      description:
-        "Live 2D auditorium theatre layout showing seats A1–E14. Real-time visual blinking for mismatches, Web Audio alarm siren, alert acknowledgment workflows, and staff overrides.",
-      href: "/user/staff",
-      icon: ShieldAlert,
-      gradient: "from-amber-500/10 via-orange-500/5 to-transparent",
-      borderColor: "hover:border-amber-500/50",
-      cta: "Open Staff Map (/user/staff)",
-    },
-    {
-      title: "QR Reader & Ticket Validator (/reader)",
-      tag: "Display 3: Hardware Alternative",
+      title: "QR Validator & Scanner",
+      tag: "Mobile Camera",
       tagColor: "bg-blue-500/20 text-blue-300 border-blue-500/40",
       description:
-        "Dedicated reader interface acting as the software alternative to physical scanners. Validates 30s dynamic QRs at gate turnstiles or seat units via camera or instant 1-click token testing.",
-      href: "/reader",
-      icon: QrCode,
+        "Dedicated mobile validation page. Features camera scanner, gate vs seat verification mode, audio tones, haptics, and instant 1-click test token validation without needing a physical camera.",
+      href: "/qr/validate",
+      icon: CheckCircle2,
       gradient: "from-blue-500/10 via-cyan-500/5 to-transparent",
       borderColor: "hover:border-blue-500/50",
-      cta: "Open QR Reader (/reader)",
+      cta: "Open QR Validator",
+    },
+    {
+      title: "Emergency SOS Page",
+      tag: "High Priority",
+      tagColor: "bg-rose-500/20 text-rose-300 border-rose-500/40",
+      description:
+        "Dedicated standalone SOS emergency portal. Instantly broadcasts medical, security, fire, or assistance alerts with seat coordinates to staff command map and blinks seat units.",
+      href: "/sos",
+      icon: ShieldAlert,
+      gradient: "from-rose-500/10 via-red-500/5 to-transparent",
+      borderColor: "hover:border-rose-500/50",
+      cta: "Open Emergency SOS",
+    },
+    {
+      title: "Software Components Hub",
+      tag: "Architecture",
+      tagColor: "bg-purple-500/20 text-purple-300 border-purple-500/40",
+      description:
+        "Modular software hub showing each component in isolation with testing tabs, network hosting guide for mobile Wi-Fi, and deployment documentation.",
+      href: "/software",
+      icon: Layers,
+      gradient: "from-purple-500/10 via-pink-500/5 to-transparent",
+      borderColor: "hover:border-purple-500/50",
+      cta: "Explore Software Hub",
+    },
+    {
+      title: "Staff Command Center",
+      tag: "Realtime",
+      tagColor: "bg-amber-500/20 text-amber-300 border-amber-500/40",
+      description:
+        "Live 2D auditorium & coach map with Supabase Realtime. Visual blinking for affected seats, Web Audio alarm synthesizer, vibration, and alert acknowledgment workflows.",
+      href: "/staff",
+      icon: Activity,
+      gradient: "from-amber-500/10 via-orange-500/5 to-transparent",
+      borderColor: "hover:border-amber-500/50",
+      cta: "Open Live Staff Map",
     },
     {
       title: "Virtual Seat Unit",
       tag: "Software Sensor",
-      tagColor: "bg-purple-500/20 text-purple-300 border-purple-500/40",
+      tagColor: "bg-teal-500/20 text-teal-300 border-teal-500/40",
       description:
         "Complete software replacement for physical seat hardware. Features simulated pressure sensor slider (Sit, Stand, Bag), mini seat OLED display, fault injector, and 10s heartbeat.",
       href: "/seat-unit/SCREEN2-A12",
       icon: Tv,
-      gradient: "from-purple-500/10 via-pink-500/5 to-transparent",
-      borderColor: "hover:border-purple-500/50",
+      gradient: "from-teal-500/10 via-emerald-500/5 to-transparent",
+      borderColor: "hover:border-teal-500/50",
       cta: "Launch Virtual Unit A12",
     },
     {
-      title: "Admin Governance & Audit (/admin)",
-      tag: "Display 4: Security & Fleet",
-      tagColor: "bg-rose-500/20 text-rose-300 border-rose-500/40",
+      title: "Admin Governance & Audit",
+      tag: "Security",
+      tagColor: "bg-slate-500/20 text-slate-300 border-slate-500/40",
       description:
-        "Dedicated administrator module. System KPIs, seat unit health dashboard, analytics charts, settings configuration, and SHA-256 tamper-evident hash-chained audit log verifier.",
+        "System KPIs, seat unit health dashboard, analytics charts, settings configuration, and SHA-256 tamper-evident hash-chained audit log verifier.",
       href: "/admin",
       icon: LayoutDashboard,
-      gradient: "from-rose-500/10 via-red-500/5 to-transparent",
-      borderColor: "hover:border-rose-500/50",
-      cta: "Open Admin Dashboard (/admin)",
+      gradient: "from-slate-500/10 via-gray-500/5 to-transparent",
+      borderColor: "hover:border-slate-500/50",
+      cta: "Open Admin Dashboard",
     },
   ];
 
@@ -116,27 +140,41 @@ export default function HomePage() {
           bag-versus-passenger weight discrimination, and tamper-evident audit logging.
         </p>
 
-        <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
           <Link
             href="/demo"
-            className="px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold text-sm shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 hover:scale-[1.02] transition-all flex items-center gap-2"
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold text-xs sm:text-sm shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 hover:scale-[1.02] transition-all flex items-center gap-2"
           >
             <Flame className="w-4 h-4" />
-            Start 2-Minute Interactive Demo
+            2-Minute Demo
           </Link>
           <Link
-            href="/t/tok_bk829173_secure_demo_link"
-            className="px-6 py-3 rounded-xl bg-slate-900 text-slate-200 border border-slate-700 hover:border-slate-500 hover:bg-slate-800 font-semibold text-sm transition-all flex items-center gap-2"
+            href="/qr/generate"
+            className="px-4 py-2.5 rounded-xl bg-slate-900 text-slate-200 border border-indigo-500/40 hover:border-indigo-400 hover:bg-slate-800 font-semibold text-xs sm:text-sm transition-all flex items-center gap-2"
           >
-            <Smartphone className="w-4 h-4 text-indigo-400" />
-            Passenger Ticket (30s QR)
+            <QrCode className="w-4 h-4 text-indigo-400" />
+            QR Generator
           </Link>
           <Link
-            href="/reader"
-            className="px-6 py-3 rounded-xl bg-slate-900 text-slate-200 border border-slate-700 hover:border-purple-500 hover:bg-slate-800 font-semibold text-sm transition-all flex items-center gap-2"
+            href="/qr/validate"
+            className="px-4 py-2.5 rounded-xl bg-slate-900 text-slate-200 border border-blue-500/40 hover:border-blue-400 hover:bg-slate-800 font-semibold text-xs sm:text-sm transition-all flex items-center gap-2"
           >
-            <QrCode className="w-4 h-4 text-purple-400" />
-            QR Reader & Validator
+            <CheckCircle2 className="w-4 h-4 text-blue-400" />
+            QR Validator
+          </Link>
+          <Link
+            href="/sos"
+            className="px-4 py-2.5 rounded-xl bg-rose-600/20 text-rose-200 border border-rose-500/50 hover:bg-rose-600 hover:text-white font-bold text-xs sm:text-sm transition-all flex items-center gap-2 shadow-md shadow-rose-500/20"
+          >
+            <ShieldAlert className="w-4 h-4 text-rose-400 animate-pulse" />
+            Emergency SOS
+          </Link>
+          <Link
+            href="/software"
+            className="px-4 py-2.5 rounded-xl bg-slate-900 text-slate-200 border border-slate-700 hover:border-purple-400 hover:bg-slate-800 font-semibold text-xs sm:text-sm transition-all flex items-center gap-2"
+          >
+            <Layers className="w-4 h-4 text-purple-400" />
+            Software Hub
           </Link>
         </div>
       </div>

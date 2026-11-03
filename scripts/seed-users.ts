@@ -5,6 +5,25 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import fs from "fs";
+import path from "path";
+
+// Auto-load .env.local or .env if present
+const envFiles = [".env.local", ".env"];
+for (const file of envFiles) {
+  const p = path.resolve(process.cwd(), file);
+  if (fs.existsSync(p)) {
+    const content = fs.readFileSync(p, "utf-8");
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const [key, ...vals] = trimmed.split("=");
+      if (key && vals.length > 0 && !process.env[key.trim()]) {
+        process.env[key.trim()] = vals.join("=").trim().replace(/^["']|["']$/g, "");
+      }
+    }
+  }
+}
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";

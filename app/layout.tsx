@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   description:
     "100% Software-driven ticket verification extending from entry gates to individual seats with dynamic cryptographic QRs, real-time occupancy state engine, and silent mismatch alerting.",
   icons: {
-    icon: "/favicon.ico",
+    icon: "/icon.svg",
   },
 };
 
