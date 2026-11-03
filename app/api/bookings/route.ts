@@ -80,6 +80,24 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Dynamic hold enforcement: Check if currently held by another passenger.
+  // Expired holds (expires_at <= nowIso) are automatically ignored without waiting for cron.
+  const nowIso = new Date().toISOString();
+  const { data: activeHold } = await supabase
+    .from("seat_holds")
+    .select("id, user_id, expires_at")
+    .eq("event_id", eventId)
+    .eq("seat_id", seatId)
+    .gt("expires_at", nowIso)
+    .maybeSingle();
+
+  if (activeHold && activeHold.user_id && userId && activeHold.user_id !== userId) {
+    return NextResponse.json(
+      { success: false, message: "This seat is temporarily held by another passenger during checkout." },
+      { status: 409 }
+    );
+  }
+
   // Generate Booking Reference (e.g. BK829173)
   const randomSuffix = Math.floor(100000 + Math.random() * 900000);
   const bookingRef = `BK${randomSuffix}`;

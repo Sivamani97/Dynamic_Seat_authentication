@@ -1,6 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient as createBaseClient, SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { NextRequest } from "next/server";
 
 export function createServerSupabaseClient() {
   const cookieStore = cookies();
@@ -48,6 +49,49 @@ export function getAdminClient(): SupabaseClient {
       autoRefreshToken: false,
     },
   });
+}
+
+/**
+ * Cryptographically verifies and extracts the authenticated user from:
+ * 1. Authorization: Bearer <access_token>
+ * 2. Supabase auth session cookies (via SSR client)
+ * 
+ * Secure: Never trusts client-provided x-user-id or unverified headers.
+ */
+export async function getAuthenticatedUser(
+  request: NextRequest,
+  adminClient?: SupabaseClient
+): Promise<{ id: string; email?: string } | null> {
+  const supabase = adminClient || getAdminClient();
+
+  // 1. Verify Authorization Bearer token if provided
+  const authHeader = request.headers.get("authorization");
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
+    if (token) {
+      try {
+        const { data, error } = await supabase.auth.getUser(token);
+        if (!error && data?.user?.id) {
+          return { id: data.user.id, email: data.user.email };
+        }
+      } catch (err) {
+        // Token verification failed or network timeout
+      }
+    }
+  }
+
+  // 2. Verify Supabase session cookies if present
+  try {
+    const ssrClient = createServerSupabaseClient();
+    const { data, error } = await ssrClient.auth.getUser();
+    if (!error && data?.user?.id) {
+      return { id: data.user.id, email: data.user.email };
+    }
+  } catch (err) {
+    // Cookie store may be inaccessible in non-request contexts
+  }
+
+  return null;
 }
 
 /**

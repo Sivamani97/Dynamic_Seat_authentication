@@ -14,6 +14,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 
 interface SeatModel {
   id: string;
@@ -135,9 +136,16 @@ export default function EventSeatMapPage({
     setErrorMessage(null);
 
     try {
+      const supabase = createClient();
+      const session = (await supabase.auth.getSession()).data.session;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+
       const res = await fetch("/api/bookings/hold", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           eventId: targetEventId,
           seatId: seat.id,
@@ -146,6 +154,10 @@ export default function EventSeatMapPage({
 
       const resJson = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (res.status === 401) {
+          setErrorMessage("Please sign in to select and hold a seat.");
+          return;
+        }
         if (resJson?.message?.includes("fetch failed") || resJson?.message?.includes("resilient")) {
           // Gracefully continue with resilient hold simulation
           setSelectedSeat(seat);

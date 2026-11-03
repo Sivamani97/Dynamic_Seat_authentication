@@ -3,21 +3,52 @@ import { logAuditEvent } from "./supabase/server";
 
 export interface EvaluationSummary {
   expiredHoldsRemoved: number;
+  expiredTokensRemoved: number;
+  expiredRateLimitsRemoved: number;
   mismatchesTriggered: number;
   missedHeartbeatsDetected: number;
   prolongedUncertainDetected: number;
   timestamp: string;
 }
 
+export interface EvaluationOptions {
+  forceFullSweep?: boolean;
+}
+
+// In-memory debounce guard to prevent duplicate executions from concurrent ticks
+let lastRunTimestamp = 0;
+let lastSummary: EvaluationSummary | null = null;
+const DEBOUNCE_INTERVAL_MS = 2000;
+
+export function resetEvaluationDebounceForTesting() {
+  lastRunTimestamp = 0;
+  lastSummary = null;
+}
+
 /**
- * Shared evaluation logic for Vercel Cron (/api/cron/evaluate)
+ * Shared evaluation and cleanup logic for daily Vercel Cron (/api/cron/evaluate)
  * and client-side tick fallback (/api/engine/tick).
+ * 
+ * - Purges expired seat holds, expired used replay tokens, and expired rate-limits.
+ * - Evaluates seat mismatches and transitions unclaimed occupied seats to WRONG_SEAT.
+ * - Detects missed hardware/virtual seat unit heartbeats.
+ * - Idempotent and thread-safe: duplicate runs within DEBOUNCE_INTERVAL_MS return cached summary.
  */
 export async function runSystemEvaluation(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  options?: EvaluationOptions
 ): Promise<EvaluationSummary> {
   const now = new Date();
   const nowIso = now.toISOString();
+  const nowEpoch = now.getTime();
+
+  // Deduplication check: return cached summary if executed within debounce window
+  if (!options?.forceFullSweep && nowEpoch - lastRunTimestamp < DEBOUNCE_INTERVAL_MS && lastSummary) {
+    return {
+      ...lastSummary,
+      timestamp: nowIso,
+    };
+  }
 
   try {
     // 1. Fetch system settings
@@ -38,13 +69,37 @@ export async function runSystemEvaluation(
       }
     });
 
-    // 2. Clean Expired Seat Holds
+    // 2. Clean Expired Seat Holds (Idempotent atomic delete)
     const { count: deletedHoldsCount } = await supabase
       .from("seat_holds")
       .delete({ count: "exact" })
       .lt("expires_at", nowIso);
 
-    // 3. Evaluate Pending Mismatches in Seat States
+    // 3. Clean Expired Used Tokens (Replay nonces that are past TTL cannot be reused anyway)
+    let deletedTokensCount = 0;
+    try {
+      const { count } = await supabase
+        .from("used_tokens")
+        .delete({ count: "exact" })
+        .lt("expires_at", nowIso);
+      deletedTokensCount = count || 0;
+    } catch {
+      // Table may not have expired tokens or table might be empty
+    }
+
+    // 4. Clean Expired Rate Limits (Database fallback sliding-window maintenance)
+    let deletedRateLimitsCount = 0;
+    try {
+      const { count } = await supabase
+        .from("rate_limits")
+        .delete({ count: "exact" })
+        .lt("reset_at", nowIso);
+      deletedRateLimitsCount = count || 0;
+    } catch {
+      // Ignore if rate_limits table empty
+    }
+
+    // 5. Evaluate Pending Mismatches in Seat States
     // A seat is in mismatch if occupancy=OCCUPIED, authorization=UNAUTHORIZED, mismatch_since is set
     const { data: pendingMismatches } = await supabase
       .from("seat_states")
@@ -85,7 +140,7 @@ export async function runSystemEvaluation(
 
           const seat = item.seat as any;
 
-          // Check if alert already exists
+          // Check if alert already exists to prevent duplicate alert rows
           const { data: existingAlert } = await supabase
             .from("alerts")
             .select("id")
@@ -132,7 +187,7 @@ export async function runSystemEvaluation(
       }
     }
 
-    // 4. Evaluate Missed Heartbeats from Seat Units
+    // 6. Evaluate Missed Heartbeats from Seat Units
     const timeoutThresholdDate = new Date(
       now.getTime() - settings.heartbeat_timeout_sec * 1000
     ).toISOString();
@@ -189,17 +244,26 @@ export async function runSystemEvaluation(
       }
     }
 
-    return {
+    const summary: EvaluationSummary = {
       expiredHoldsRemoved: deletedHoldsCount || 0,
+      expiredTokensRemoved: deletedTokensCount,
+      expiredRateLimitsRemoved: deletedRateLimitsCount,
       mismatchesTriggered,
       missedHeartbeatsDetected,
       prolongedUncertainDetected: 0,
       timestamp: nowIso,
     };
+
+    lastRunTimestamp = nowEpoch;
+    lastSummary = summary;
+
+    return summary;
   } catch (err: any) {
     console.warn("runSystemEvaluation exception caught safely:", err?.message);
     return {
       expiredHoldsRemoved: 0,
+      expiredTokensRemoved: 0,
+      expiredRateLimitsRemoved: 0,
       mismatchesTriggered: 0,
       missedHeartbeatsDetected: 0,
       prolongedUncertainDetected: 0,

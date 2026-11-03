@@ -77,13 +77,16 @@ export async function GET(
 
     const bookedSeatIds = new Set(bookings?.map((b) => b.seat_id) || []);
 
-    // 4. Fetch Active Holds for this Event
+    // 4. Fetch Active Holds for this Event (expired holds are dynamically excluded)
     const nowIso = new Date().toISOString();
     const { data: holds } = await supabase
       .from("seat_holds")
       .select("seat_id")
       .eq("event_id", targetEventId)
       .gt("expires_at", nowIso);
+
+    // Opportunistically prune expired holds in background without blocking seat map query
+    Promise.resolve(supabase.from("seat_holds").delete().lt("expires_at", nowIso)).catch(() => {});
 
     const heldSeatIds = new Set(holds?.map((h) => h.seat_id) || []);
 
