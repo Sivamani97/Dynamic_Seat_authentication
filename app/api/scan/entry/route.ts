@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminClient, logAuditEvent, getAuthenticatedUser } from "@/lib/supabase/server";
-import { verifyDynamicToken } from "@/lib/tokens";
+import { generateDynamicToken, verifyDynamicToken } from "@/lib/tokens";
 import { ScanEntrySchema } from "@/lib/schemas";
 import { checkRateLimit } from "@/lib/ratelimit";
 
@@ -74,7 +74,44 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { token, eventId } = parseResult.data;
+  let token = parseResult.data.token.trim();
+  const { eventId } = parseResult.data;
+
+  // 2.1 Smart URL normalization: extract raw token if a full URL was scanned
+  try {
+    if (token.startsWith("http://") || token.startsWith("https://")) {
+      const u = new URL(token);
+      const qToken = u.searchParams.get("token");
+      if (qToken) {
+        token = qToken.trim();
+      } else {
+        const m = u.pathname.match(/\/t\/([^/?#]+)/);
+        if (m && m[1]) {
+          token = m[1].trim();
+        }
+      }
+    }
+  } catch {}
+
+  // 2.2 Bridge ticket link token: if ticket_link_token was scanned, generate a fresh active token
+  if (token.startsWith("tok_")) {
+    const { data: bData } = await supabase
+      .from("bookings")
+      .select("id, seat_id, event_id, booking_secret")
+      .eq("ticket_link_token", token)
+      .maybeSingle();
+
+    if (bData) {
+      const dynamicTokenObj = generateDynamicToken({
+        bookingId: bData.id,
+        seatId: bData.seat_id,
+        eventId: bData.event_id,
+        bookingSecret: bData.booking_secret,
+        lifetimeSec: 30,
+      });
+      token = dynamicTokenObj.token;
+    }
+  }
 
   // 3. Fast-decode token payload without verification first to retrieve booking record
   let rawPayload: any;

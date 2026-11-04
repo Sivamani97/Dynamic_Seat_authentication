@@ -62,9 +62,29 @@ export function QrScannerValidator({
 
   const qrRegionId = "qr-scanner-viewport-unique";
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isProcessingRef = useRef<boolean>(false);
+  const lastScannedTokenRef = useRef<string>("");
+  const lastScannedTimeRef = useRef<number>(0);
+  const autoResetTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Helper to extract clean token from URL or raw text
+  const extractTokenFromQr = (raw: string): string => {
+    const trimmed = raw.trim();
+    try {
+      if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        const url = new URL(trimmed);
+        const tokenParam = url.searchParams.get("token");
+        if (tokenParam) return tokenParam.trim();
+        const match = url.pathname.match(/\/t\/([^/?#]+)/);
+        if (match && match[1]) return match[1].trim();
+      }
+    } catch {}
+    return trimmed;
+  };
 
   // Stop camera cleanly
   const stopCamera = async () => {
+    if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
     if (scannerRef.current && scanning) {
       try {
         await scannerRef.current.stop();
@@ -79,6 +99,8 @@ export function QrScannerValidator({
     try {
       setCameraError(null);
       setScanResult(null);
+      isProcessingRef.current = false;
+      lastScannedTokenRef.current = "";
 
       // Stop previous instance if running
       if (scannerRef.current) {
@@ -91,8 +113,8 @@ export function QrScannerValidator({
       scannerRef.current = html5QrCode;
 
       const config = {
-        fps: 10,
-        qrbox: { width: 240, height: 240 },
+        fps: 15,
+        qrbox: { width: 250, height: 250 },
         aspectRatio: 1.0,
       };
 
@@ -127,6 +149,7 @@ export function QrScannerValidator({
 
   useEffect(() => {
     return () => {
+      if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
       if (scannerRef.current && scanning) {
         scannerRef.current.stop().catch(() => {});
       }
@@ -134,10 +157,22 @@ export function QrScannerValidator({
   }, [scanning]);
 
   // Process token via Gate or Seat scanner endpoint
-  const handleProcessToken = async (tokenString: string) => {
-    if (submitting) return;
+  const handleProcessToken = async (rawTokenString: string) => {
+    const cleanToken = extractTokenFromQr(rawTokenString);
+    if (!cleanToken) return;
+
+    // Strict synchronous lock check
+    if (isProcessingRef.current) return;
+
+    const now = Date.now();
+    if (cleanToken === lastScannedTokenRef.current && now - lastScannedTimeRef.current < 4000) {
+      return;
+    }
+
+    isProcessingRef.current = true;
+    lastScannedTokenRef.current = cleanToken;
+    lastScannedTimeRef.current = now;
     setSubmitting(true);
-    const cleanToken = tokenString.trim();
 
     try {
       if (readerMode === "GATE") {
@@ -193,6 +228,11 @@ export function QrScannerValidator({
       soundManager.playErrorTone();
     } finally {
       setSubmitting(false);
+      // Auto-unlock after 3.5s cooldown
+      if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
+      autoResetTimerRef.current = setTimeout(() => {
+        isProcessingRef.current = false;
+      }, 3500);
     }
   };
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminClient, logAuditEvent, getAuthenticatedUser } from "@/lib/supabase/server";
-import { verifyDynamicToken } from "@/lib/tokens";
+import { generateDynamicToken, verifyDynamicToken } from "@/lib/tokens";
 import { ScanSeatSchema } from "@/lib/schemas";
 import { checkRateLimit } from "@/lib/ratelimit";
 
@@ -58,7 +58,44 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { token, unitId } = parseResult.data;
+  let token = parseResult.data.token.trim();
+  const { unitId } = parseResult.data;
+
+  // Smart URL normalization: extract token if a full URL was scanned
+  try {
+    if (token.startsWith("http://") || token.startsWith("https://")) {
+      const u = new URL(token);
+      const qToken = u.searchParams.get("token");
+      if (qToken) {
+        token = qToken.trim();
+      } else {
+        const m = u.pathname.match(/\/t\/([^/?#]+)/);
+        if (m && m[1]) {
+          token = m[1].trim();
+        }
+      }
+    }
+  } catch {}
+
+  // Bridge ticket link token: if ticket_link_token was scanned, generate a fresh active token
+  if (token.startsWith("tok_")) {
+    const { data: bData } = await supabase
+      .from("bookings")
+      .select("id, seat_id, event_id, booking_secret")
+      .eq("ticket_link_token", token)
+      .maybeSingle();
+
+    if (bData) {
+      const dynamicTokenObj = generateDynamicToken({
+        bookingId: bData.id,
+        seatId: bData.seat_id,
+        eventId: bData.event_id,
+        bookingSecret: bData.booking_secret,
+        lifetimeSec: 30,
+      });
+      token = dynamicTokenObj.token;
+    }
+  }
 
   // 3. Rate Limiting Check
   const rateLimit = await checkRateLimit(`scan_seat_${unitId}`, supabase, 40, 60);

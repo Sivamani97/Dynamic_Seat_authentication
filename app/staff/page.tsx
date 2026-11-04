@@ -114,33 +114,64 @@ export default function StaffCommandPage() {
 
     setSeatMap(initialMap);
 
-    // Initial alert demo state
-    setAlerts([
-      {
-        id: "alert-001",
-        seat_label: "A12",
-        type: "SOS",
-        priority: "CRITICAL",
-        status: "NEW",
-        message: "Assistance requested at Seat A12: Passenger needs assistance.",
-        created_at: new Date(Date.now() - 60000).toISOString(),
-        booking_ref: "BK829173",
-      },
-    ]);
+    // Load active alerts from the database
+    fetch("/api/staff/alerts")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.alerts && Array.isArray(data.alerts) && data.alerts.length > 0) {
+          setAlerts(data.alerts);
+          const activeCritical = data.alerts.find(
+            (a: AlertItem) =>
+              (a.priority === "CRITICAL" || a.type === "SOS") && a.status === "NEW"
+          );
+          if (activeCritical) {
+            setHighPriorityAlert(activeCritical);
+            soundManager.startSiren();
+          }
+        } else {
+          // Fallback initial demo alert if no database alerts exist yet
+          setAlerts([
+            {
+              id: "alert-001",
+              seat_label: "A12",
+              type: "SOS",
+              priority: "CRITICAL",
+              status: "NEW",
+              message: "Assistance requested at Seat A12: Passenger needs assistance.",
+              created_at: new Date(Date.now() - 60000).toISOString(),
+              booking_ref: "BK829173",
+            },
+          ]);
+        }
+      })
+      .catch(() => {
+        setAlerts([
+          {
+            id: "alert-001",
+            seat_label: "A12",
+            type: "SOS",
+            priority: "CRITICAL",
+            status: "NEW",
+            message: "Assistance requested at Seat A12: Passenger needs assistance.",
+            created_at: new Date(Date.now() - 60000).toISOString(),
+            booking_ref: "BK829173",
+          },
+        ]);
+      });
   }, []);
 
-  // Vercel Hobby plan client-side tick fallback: polls /api/engine/tick every 5s while staff screen is open
+  // Vercel Hobby plan client-side tick fallback: polls /api/engine/tick every 8s while staff screen is open
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
         await fetch("/api/engine/tick", { method: "POST" });
       } catch {}
-    }, 5000);
+    }, 8000);
 
     return () => clearInterval(interval);
   }, []);
 
-  // Supabase Realtime subscriptions on seat_states & alerts
+  // Supabase Realtime subscriptions on seat_states & alerts (Mounted ONCE)
   useEffect(() => {
     const supabase = createClient();
 
@@ -155,7 +186,6 @@ export default function StaffCommandPage() {
           if (!newRow) return;
 
           setSeatMap((prev) => {
-            // Find seat by seat_id
             const updated = { ...prev };
             for (const key of Object.keys(updated)) {
               if (updated[key].id === newRow.seat_id) {
@@ -184,7 +214,11 @@ export default function StaffCommandPage() {
         { event: "INSERT", schema: "public", table: "alerts" },
         (payload: any) => {
           const newAlert = payload.new as AlertItem;
-          setAlerts((prev) => [newAlert, ...prev]);
+          // De-duplicate: Never add the same alert ID twice
+          setAlerts((prev) => {
+            if (prev.some((a) => a.id === newAlert.id)) return prev;
+            return [newAlert, ...prev];
+          });
 
           // High-priority alert actions: Audible Siren + Banner + Vibration
           if (newAlert.priority === "CRITICAL" || newAlert.type === "SOS") {
@@ -194,7 +228,6 @@ export default function StaffCommandPage() {
           } else if (newAlert.type !== "WRONG_SEAT") {
             soundManager.playErrorTone();
           }
-          // Note: WRONG_SEAT alerts are intentionally silent per requirement!
         }
       )
       .on(
@@ -205,13 +238,14 @@ export default function StaffCommandPage() {
           setAlerts((prev) =>
             prev.map((a) => (a.id === updatedAlert.id ? updatedAlert : a))
           );
-          if (
-            highPriorityAlert?.id === updatedAlert.id &&
-            updatedAlert.status !== "NEW"
-          ) {
-            setHighPriorityAlert(null);
-            soundManager.stopSiren();
-          }
+          // If updated alert is no longer NEW, check if any other critical alerts remain
+          setHighPriorityAlert((current) => {
+            if (current?.id === updatedAlert.id && updatedAlert.status !== "NEW") {
+              soundManager.stopSiren();
+              return null;
+            }
+            return current;
+          });
         }
       )
       .subscribe();
@@ -221,7 +255,7 @@ export default function StaffCommandPage() {
       supabase.removeChannel(alertChannel);
       soundManager.stopSiren();
     };
-  }, [highPriorityAlert]);
+  }, []);
 
   // Audio Mute toggle
   const toggleSound = () => {
@@ -230,7 +264,46 @@ export default function StaffCommandPage() {
     soundManager.setMuted(next);
   };
 
-  // Alert Workflow: Acknowledge, Resolve, Escalate
+  // Bulk Acknowledge All Active Alerts
+  const handleAcknowledgeAll = async () => {
+    soundManager.stopSiren();
+    setHighPriorityAlert(null);
+
+    // Optimistically update all NEW alerts locally
+    setAlerts((prev) =>
+      prev.map((a) =>
+        a.status === "NEW" ? { ...a, status: "ACKNOWLEDGED" as AlertStatus } : a
+      )
+    );
+
+    try {
+      await fetch("/api/staff/alerts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "ACKNOWLEDGE_ALL" }),
+      });
+    } catch {}
+  };
+
+  // Bulk Resolve All Alerts
+  const handleResolveAll = async () => {
+    soundManager.stopSiren();
+    setHighPriorityAlert(null);
+
+    setAlerts((prev) =>
+      prev.map((a) => ({ ...a, status: "RESOLVED" as AlertStatus }))
+    );
+
+    try {
+      await fetch("/api/staff/alerts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "RESOLVE_ALL" }),
+      });
+    } catch {}
+  };
+
+  // Individual Alert Workflow: Acknowledge, Resolve, Escalate
   const handleAlertAction = async (
     alertId: string,
     action: "ACKNOWLEDGE" | "RESOLVE" | "ESCALATE",
@@ -246,41 +319,60 @@ export default function StaffCommandPage() {
         }),
       });
 
-      if (res.ok) {
-        soundManager.stopSiren();
-        if (highPriorityAlert?.id === alertId) {
-          setHighPriorityAlert(null);
-        }
-        // Update local alert
-        setAlerts((prev) =>
-          prev.map((a) =>
-            a.id === alertId
-              ? {
-                  ...a,
-                  status:
-                    action === "ACKNOWLEDGE"
-                      ? "ACKNOWLEDGED"
-                      : action === "RESOLVE"
-                      ? "RESOLVED"
-                      : a.status,
-                  priority: action === "ESCALATE" ? "CRITICAL" : a.priority,
-                }
-              : a
-          )
-        );
-      }
-    } catch {
-      // Fallback local update
-      setAlerts((prev) =>
-        prev.map((a) =>
+      // Update local state regardless
+      setAlerts((prev) => {
+        const nextList = prev.map((a) =>
           a.id === alertId
             ? {
                 ...a,
-                status: action === "ACKNOWLEDGE" ? "ACKNOWLEDGED" : "RESOLVED",
+                status:
+                  action === "ACKNOWLEDGE"
+                    ? ("ACKNOWLEDGED" as AlertStatus)
+                    : action === "RESOLVE"
+                    ? ("RESOLVED" as AlertStatus)
+                    : a.status,
+                priority: action === "ESCALATE" ? ("CRITICAL" as AlertPriority) : a.priority,
               }
             : a
-        )
-      );
+        );
+
+        // Check if any other unacknowledged critical alert remains
+        const hasRemainingCritical = nextList.some(
+          (a) => (a.priority === "CRITICAL" || a.type === "SOS") && a.status === "NEW"
+        );
+
+        if (!hasRemainingCritical) {
+          soundManager.stopSiren();
+          setHighPriorityAlert(null);
+        } else {
+          const nextCritical = nextList.find(
+            (a) => (a.priority === "CRITICAL" || a.type === "SOS") && a.status === "NEW"
+          );
+          setHighPriorityAlert(nextCritical || null);
+        }
+
+        return nextList;
+      });
+    } catch {
+      // Fallback local update
+      setAlerts((prev) => {
+        const nextList = prev.map((a) =>
+          a.id === alertId
+            ? {
+                ...a,
+                status: action === "ACKNOWLEDGE" ? ("ACKNOWLEDGED" as AlertStatus) : ("RESOLVED" as AlertStatus),
+              }
+            : a
+        );
+        const hasRemainingCritical = nextList.some(
+          (a) => (a.priority === "CRITICAL" || a.type === "SOS") && a.status === "NEW"
+        );
+        if (!hasRemainingCritical) {
+          soundManager.stopSiren();
+          setHighPriorityAlert(null);
+        }
+        return nextList;
+      });
     }
   };
 
@@ -324,26 +416,42 @@ export default function StaffCommandPage() {
     return a.priority === filterPriority;
   });
 
+  const unacknowledgedCritical = alerts.filter(
+    (a) => (a.priority === "CRITICAL" || a.type === "SOS") && a.status === "NEW"
+  );
+  const unacknowledgedCount = alerts.filter((a) => a.status === "NEW").length;
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       {/* High-Priority Emergency Full-Screen Banner Overlay */}
-      {highPriorityAlert && (
+      {unacknowledgedCritical.length > 0 && (
         <div className="fixed top-0 left-0 right-0 z-50 p-4 bg-rose-600 text-white shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-4 animate-beacon">
           <div className="flex items-center gap-3">
             <span className="text-2xl animate-bounce">🚨</span>
             <div>
               <div className="font-black text-sm uppercase tracking-wider">
-                CRITICAL EMERGENCY ALERT • SEAT {highPriorityAlert.seat_label || "A12"}
+                {unacknowledgedCritical.length === 1
+                  ? `CRITICAL EMERGENCY ALERT • SEAT ${unacknowledgedCritical[0].seat_label || "A12"}`
+                  : `${unacknowledgedCritical.length} CRITICAL EMERGENCY ALERTS • SEATS ${unacknowledgedCritical
+                      .map((a) => a.seat_label || "A12")
+                      .slice(0, 4)
+                      .join(", ")}${unacknowledgedCritical.length > 4 ? "..." : ""}`}
               </div>
-              <div className="text-xs text-rose-100">{highPriorityAlert.message}</div>
+              <div className="text-xs text-rose-100">
+                {unacknowledgedCritical.length === 1
+                  ? unacknowledgedCritical[0].message
+                  : `Multiple urgent emergency requests received simultaneously. Instant responder attendance required.`}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => handleAlertAction(highPriorityAlert.id, "ACKNOWLEDGE")}
-              className="px-4 py-2 rounded-xl bg-white text-rose-700 font-bold text-xs shadow-md hover:bg-rose-50"
+              onClick={handleAcknowledgeAll}
+              className="px-4 py-2 rounded-xl bg-white text-rose-700 font-bold text-xs shadow-md hover:bg-rose-50 transition-all"
             >
-              Acknowledge & Silence Siren
+              {unacknowledgedCritical.length === 1
+                ? "Acknowledge & Silence Siren"
+                : `Acknowledge All (${unacknowledgedCritical.length}) & Silence Siren`}
             </button>
             <button
               onClick={() => {
@@ -351,6 +459,7 @@ export default function StaffCommandPage() {
                 soundManager.stopSiren();
               }}
               className="p-2 rounded-xl bg-rose-700 hover:bg-rose-800 text-white text-xs"
+              title="Dismiss banner"
             >
               <X className="w-4 h-4" />
             </button>
@@ -484,7 +593,7 @@ export default function StaffCommandPage() {
         {/* Right: Live Alerts Panel */}
         <div className="lg:col-span-4 glass-card rounded-3xl border border-slate-800 p-6 space-y-4 flex flex-col justify-between">
           <div className="space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Bell className="w-4 h-4 text-amber-400" />
                 <h2 className="font-bold text-white text-base">Alerts Feed</h2>
@@ -493,17 +602,29 @@ export default function StaffCommandPage() {
                 </span>
               </div>
 
-              {/* Priority Filter */}
-              <select
-                value={filterPriority}
-                onChange={(e) => setFilterPriority(e.target.value)}
-                className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-300"
-              >
-                <option value="ALL">All Priorities</option>
-                <option value="CRITICAL">Critical Only</option>
-                <option value="HIGH">High Only</option>
-                <option value="MEDIUM">Medium Only</option>
-              </select>
+              <div className="flex items-center gap-2">
+                {unacknowledgedCount > 0 && (
+                  <button
+                    onClick={handleAcknowledgeAll}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow-sm transition-all"
+                    title="Acknowledge all pending alerts at once"
+                  >
+                    Acknowledge All ({unacknowledgedCount})
+                  </button>
+                )}
+
+                {/* Priority Filter */}
+                <select
+                  value={filterPriority}
+                  onChange={(e) => setFilterPriority(e.target.value)}
+                  className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-300"
+                >
+                  <option value="ALL">All Priorities</option>
+                  <option value="CRITICAL">Critical Only</option>
+                  <option value="HIGH">High Only</option>
+                  <option value="MEDIUM">Medium Only</option>
+                </select>
+              </div>
             </div>
 
             {/* Alert Items List */}

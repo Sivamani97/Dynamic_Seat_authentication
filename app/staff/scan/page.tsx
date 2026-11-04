@@ -31,26 +31,48 @@ export default function GateScannerPage() {
   const [manualToken, setManualToken] = useState<string>("");
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
+  const [lastDetectedAt, setLastDetectedAt] = useState<string | null>(null);
 
   const qrRegionId = "html5qr-code-full-region";
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isProcessingRef = useRef<boolean>(false);
+  const lastScannedTokenRef = useRef<string>("");
+  const lastScannedTimeRef = useRef<number>(0);
+  const autoResetTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Helper to extract clean token from URL or raw text
+  const extractTokenFromQr = (raw: string): string => {
+    const trimmed = raw.trim();
+    try {
+      if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        const url = new URL(trimmed);
+        const tokenParam = url.searchParams.get("token");
+        if (tokenParam) return tokenParam.trim();
+        const match = url.pathname.match(/\/t\/([^/?#]+)/);
+        if (match && match[1]) return match[1].trim();
+      }
+    } catch {}
+    return trimmed;
+  };
 
   // Initialize or stop camera scanner
   const startCamera = async () => {
     try {
       setCameraError(null);
       setScanResult(null);
+      isProcessingRef.current = false;
+      lastScannedTokenRef.current = "";
 
       const html5QrCode = new Html5Qrcode(qrRegionId);
       scannerRef.current = html5QrCode;
 
-      const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+      const config = { fps: 15, qrbox: { width: 260, height: 260 }, aspectRatio: 1.0 };
 
       await html5QrCode.start(
         { facingMode: "environment" },
         config,
         async (decodedText) => {
-          // Token detected
+          // Instant validation as soon as QR is detected in camera
           await handleProcessToken(decodedText);
         },
         () => {
@@ -68,6 +90,7 @@ export default function GateScannerPage() {
   };
 
   const stopCamera = async () => {
+    if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
     if (scannerRef.current && scanning) {
       try {
         await scannerRef.current.stop();
@@ -79,6 +102,7 @@ export default function GateScannerPage() {
 
   useEffect(() => {
     return () => {
+      if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
       if (scannerRef.current && scanning) {
         scannerRef.current.stop().catch(() => {});
       }
@@ -86,16 +110,31 @@ export default function GateScannerPage() {
   }, [scanning]);
 
   // Submit token to /api/scan/entry
-  const handleProcessToken = async (tokenString: string) => {
-    if (submitting) return;
+  const handleProcessToken = async (rawTokenString: string) => {
+    const token = extractTokenFromQr(rawTokenString);
+    if (!token) return;
+
+    // Strict synchronous lock check to prevent camera race conditions
+    if (isProcessingRef.current) return;
+
+    const now = Date.now();
+    // Debounce exact same token for 4 seconds to prevent duplicate re-burn of nonce
+    if (token === lastScannedTokenRef.current && now - lastScannedTimeRef.current < 4000) {
+      return;
+    }
+
+    isProcessingRef.current = true;
+    lastScannedTokenRef.current = token;
+    lastScannedTimeRef.current = now;
     setSubmitting(true);
+    setLastDetectedAt(new Date().toLocaleTimeString());
 
     try {
       const res = await fetch("/api/scan/entry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          token: tokenString.trim(),
+          token,
           eventId: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
         }),
       });
@@ -119,7 +158,20 @@ export default function GateScannerPage() {
       soundManager.playErrorTone();
     } finally {
       setSubmitting(false);
+      // Auto-unlock after 3.5s cooldown so the next passenger's QR can be scanned smoothly
+      if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
+      autoResetTimerRef.current = setTimeout(() => {
+        isProcessingRef.current = false;
+      }, 3500);
     }
+  };
+
+  const handleResetScanner = () => {
+    if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
+    setScanResult(null);
+    isProcessingRef.current = false;
+    lastScannedTokenRef.current = "";
+    lastScannedTimeRef.current = 0;
   };
 
   return (
@@ -193,12 +245,15 @@ export default function GateScannerPage() {
             </div>
           )}
 
-          <button
-            onClick={() => setScanResult(null)}
-            className="mt-2 text-xs text-slate-300 hover:text-white underline"
-          >
-            Clear & Scan Next Ticket
-          </button>
+          <div className="pt-1 flex items-center justify-between text-[11px] text-slate-400">
+            {lastDetectedAt && <span>Detected at: {lastDetectedAt}</span>}
+            <button
+              onClick={handleResetScanner}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold ml-auto"
+            >
+              Scan Next Ticket →
+            </button>
+          </div>
         </div>
       )}
 

@@ -187,12 +187,13 @@ export async function runSystemEvaluation(
       }
     }
 
-    // 6. Evaluate Missed Heartbeats from Seat Units
+    // 6. Evaluate Missed Heartbeats from Seat Units (Throttled & Cooled-Down)
     const timeoutThresholdDate = new Date(
       now.getTime() - settings.heartbeat_timeout_sec * 1000
     ).toISOString();
 
-    const { data: deadUnits } = await supabase
+    // Missed heartbeats: Throttle to max 2 units per evaluation cycle to prevent alert flooding
+    const { data: deadUnitsRaw } = await supabase
       .from("seat_units")
       .select(
         `
@@ -205,11 +206,14 @@ export async function runSystemEvaluation(
       )
       .lt("last_heartbeat", timeoutThresholdDate);
 
+    const deadUnits = (deadUnitsRaw || []).slice(0, 2);
+
     let missedHeartbeatsDetected = 0;
 
     if (deadUnits && deadUnits.length > 0) {
       for (const unit of deadUnits) {
         const seat = unit.seat as any;
+        // Check if an alert already exists (active NEW or ACKNOWLEDGED)
         const { data: existingAlert } = await supabase
           .from("alerts")
           .select("id")
@@ -225,7 +229,7 @@ export async function runSystemEvaluation(
             type: "COMM_FAILURE",
             priority: "HIGH",
             status: "NEW",
-            message: `Seat Unit ${unit.id} (Seat ${seat?.label}) missed heartbeats (> ${settings.heartbeat_timeout_sec}s). Comms offline.`,
+            message: `Seat Unit ${unit.id} (Seat ${seat?.label || "Unknown"}) missed heartbeats (> ${settings.heartbeat_timeout_sec}s). Comms offline.`,
             meta: { lastHeartbeat: unit.last_heartbeat },
           });
 
