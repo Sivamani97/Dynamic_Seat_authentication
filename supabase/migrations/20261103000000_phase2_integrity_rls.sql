@@ -162,7 +162,7 @@ BEGIN
         seat_id,
         event_id,
         occupancy,
-        authorization,
+        "authorization",
         state,
         pressure,
         mismatch_since,
@@ -280,7 +280,7 @@ BEGIN
     -- and the seat state was not modified after this booking's last update
     IF NOT v_active_subsequent_booking_exists THEN
         UPDATE public.seat_states
-        SET authorization = 'UNAUTHORIZED',
+        SET "authorization" = 'UNAUTHORIZED',
             occupancy = 'EMPTY',
             state = 'NORMAL',
             pressure = 0,

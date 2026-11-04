@@ -51,18 +51,27 @@ export function getAdminClient(): SupabaseClient {
   });
 }
 
+export interface AuthenticatedUser {
+  id: string;
+  email?: string;
+  role: "USER" | "STAFF" | "ADMIN";
+}
+
 /**
  * Cryptographically verifies and extracts the authenticated user from:
  * 1. Authorization: Bearer <access_token>
  * 2. Supabase auth session cookies (via SSR client)
  * 
  * Secure: Never trusts client-provided x-user-id or unverified headers.
+ * Obtains authoritative role strictly from public.profiles.
  */
 export async function getAuthenticatedUser(
   request: NextRequest,
   adminClient?: SupabaseClient
-): Promise<{ id: string; email?: string } | null> {
+): Promise<AuthenticatedUser | null> {
   const supabase = adminClient || getAdminClient();
+
+  let verifiedUser: { id: string; email?: string; user_metadata?: Record<string, any> } | null = null;
 
   // 1. Verify Authorization Bearer token if provided
   const authHeader = request.headers.get("authorization");
@@ -72,7 +81,11 @@ export async function getAuthenticatedUser(
       try {
         const { data, error } = await supabase.auth.getUser(token);
         if (!error && data?.user?.id) {
-          return { id: data.user.id, email: data.user.email };
+          verifiedUser = {
+            id: data.user.id,
+            email: data.user.email,
+            user_metadata: data.user.user_metadata,
+          };
         }
       } catch (err) {
         // Token verification failed or network timeout
@@ -81,17 +94,66 @@ export async function getAuthenticatedUser(
   }
 
   // 2. Verify Supabase session cookies if present
-  try {
-    const ssrClient = createServerSupabaseClient();
-    const { data, error } = await ssrClient.auth.getUser();
-    if (!error && data?.user?.id) {
-      return { id: data.user.id, email: data.user.email };
+  if (!verifiedUser) {
+    try {
+      const ssrClient = createServerSupabaseClient();
+      const { data, error } = await ssrClient.auth.getUser();
+      if (!error && data?.user?.id) {
+        verifiedUser = {
+          id: data.user.id,
+          email: data.user.email,
+          user_metadata: data.user.user_metadata,
+        };
+      }
+    } catch (err) {
+      // Cookie store may be inaccessible in non-request contexts
     }
-  } catch (err) {
-    // Cookie store may be inaccessible in non-request contexts
   }
 
-  return null;
+  if (!verifiedUser) {
+    return null;
+  }
+
+  // 3. Fetch authoritative role strictly from public.profiles
+  // SECURITY: Never trust browser-controlled user_metadata.role for authorization.
+  // Distinguish missing profiles from database lookup failures.
+  try {
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", verifiedUser.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Database error looking up profile role:", error.message);
+      // Database failure: fail closed, do not silently downgrade to valid USER session
+      return null;
+    }
+
+    if (!profile?.role) {
+      // Profile does not exist in public.profiles:
+      // Fail closed to standard USER role without elevated privileges.
+      return {
+        id: verifiedUser.id,
+        email: verifiedUser.email,
+        role: "USER",
+      };
+    }
+
+    const rawRole = profile.role;
+    const role: "USER" | "STAFF" | "ADMIN" =
+      rawRole === "ADMIN" ? "ADMIN" : rawRole === "STAFF" ? "STAFF" : "USER";
+
+    return {
+      id: verifiedUser.id,
+      email: verifiedUser.email,
+      role,
+    };
+  } catch (err) {
+    console.error("Unexpected exception during profile role lookup:", err);
+    // Fail closed on unexpected database/network exception
+    return null;
+  }
 }
 
 /**
