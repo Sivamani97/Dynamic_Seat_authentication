@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import {
   ShieldAlert,
@@ -15,39 +15,117 @@ import {
   UserCheck,
   QrCode,
   ShieldCheck,
-  Radio,
   Layers,
-  Flame,
+  LogOut,
+  LogIn,
+  User,
+  Shield,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+
+interface NavLinkItem {
+  href: string;
+  label: string;
+  icon: any;
+  emergency?: boolean;
+  highlight?: boolean;
+}
 
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [activeRole, setActiveRole] = useState<"USER" | "STAFF" | "ADMIN">("USER");
+  const [user, setUser] = useState<{ id: string; email?: string; role: "USER" | "STAFF" | "ADMIN" } | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const savedRole = localStorage.getItem("smartseat_role") as any;
-    if (savedRole && ["USER", "STAFF", "ADMIN"].includes(savedRole)) {
-      setActiveRole(savedRole);
-    }
+    const supabase = createClient();
+
+    const fetchSessionRole = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+
+        // Fetch authoritative server-verified profile role
+        const res = await fetch("/api/auth/me");
+        if (res.ok) {
+          const authData = await res.json();
+          if (authData?.authenticated && authData.user) {
+            setUser(authData.user);
+          } else {
+            setUser(null);
+          }
+        }
+      } catch (err) {
+        console.error("Navbar auth sync error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSessionRole();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(() => {
+      fetchSessionRole();
+    });
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
   }, []);
 
-  const switchRole = (role: "USER" | "STAFF" | "ADMIN") => {
-    setActiveRole(role);
-    localStorage.setItem("smartseat_role", role);
+  const handleLogout = async () => {
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      setUser(null);
+      router.push("/login");
+    } catch (err) {
+      console.error("Sign out error:", err);
+    }
   };
 
-  const navLinks = [
-    { href: "/demo", label: "2-Min Demo", icon: PlayCircle, highlight: true },
-    { href: "/qr/generate", label: "QR Gen", icon: QrCode },
-    { href: "/qr/validate", label: "QR Validator", icon: ShieldCheck },
-    { href: "/sos", label: "SOS Alert", icon: ShieldAlert, emergency: true },
-    { href: "/software", label: "Software Hub", icon: Layers },
-    { href: "/events", label: "Events & Seats", icon: Ticket },
-    { href: "/staff", label: "Staff Map", icon: ShieldAlert },
-    { href: "/seat-unit/SCREEN2-A12", label: "Seat Unit A12", icon: Tv },
-    { href: "/admin", label: "Admin", icon: LayoutDashboard },
-  ];
+  // Base navigation links based on verified role
+  const getNavLinks = (): NavLinkItem[] => {
+    if (!user) {
+      return [
+        { href: "/demo", label: "2-Min Demo", icon: PlayCircle, highlight: true },
+        { href: "/events", label: "Events & Seats", icon: Ticket },
+        { href: "/software", label: "Software Hub", icon: Layers },
+      ];
+    }
+
+    if (user.role === "ADMIN") {
+      return [
+        { href: "/admin", label: "Command Center", icon: LayoutDashboard },
+        { href: "/admin/audit", label: "Audit Chain", icon: ShieldCheck },
+        { href: "/admin/units", label: "Seat Units", icon: Tv },
+        { href: "/staff", label: "Staff Map", icon: ShieldAlert },
+        { href: "/events", label: "Events", icon: Ticket },
+      ];
+    }
+
+    if (user.role === "STAFF") {
+      return [
+        { href: "/staff", label: "Staff Map", icon: ShieldAlert },
+        { href: "/staff/scan", label: "Gate Scanner", icon: QrCode },
+        { href: "/events", label: "Events", icon: Ticket },
+      ];
+    }
+
+    // Standard Passenger (USER)
+    return [
+      { href: "/events", label: "Events & Seats", icon: Ticket },
+      { href: "/tickets", label: "My Tickets", icon: QrCode },
+      { href: "/sos", label: "Emergency SOS", icon: ShieldAlert, emergency: true },
+    ];
+  };
+
+  const navLinks = getNavLinks();
 
   return (
     <header className="sticky top-0 z-50 glass-panel border-b border-slate-800/80">
@@ -71,7 +149,7 @@ export function Navbar() {
           </div>
 
           {/* Desktop Navigation */}
-          <nav className="hidden xl:flex items-center gap-1">
+          <nav className="hidden lg:flex items-center gap-1.5">
             {navLinks.map((link) => {
               const Icon = link.icon;
               const isActive = pathname === link.href || (link.href !== "/" && pathname.startsWith(link.href));
@@ -79,7 +157,7 @@ export function Navbar() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
                     link.emergency
                       ? isActive
                         ? "bg-rose-600 text-white font-bold shadow-md shadow-rose-600/30"
@@ -98,62 +176,71 @@ export function Navbar() {
             })}
           </nav>
 
-          {/* Medium screen navigation fallback (essential links) */}
-          <div className="hidden md:flex xl:hidden items-center gap-1.5">
-            <Link
-              href="/qr/generate"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-slate-800/70 border border-slate-700"
-            >
-              <QrCode className="w-3.5 h-3.5 text-indigo-400" />
-              <span>QR Gen</span>
-            </Link>
-            <Link
-              href="/qr/validate"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-slate-800/70 border border-slate-700"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
-              <span>Validator</span>
-            </Link>
-            <Link
-              href="/sos"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-rose-300 hover:text-white bg-rose-600/20 border border-rose-500/30"
-            >
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
-              <span>SOS</span>
-            </Link>
-            <Link
-              href="/software"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-slate-800/70 border border-slate-700"
-            >
-              <Layers className="w-3.5 h-3.5 text-purple-400" />
-              <span>Hub</span>
-            </Link>
-          </div>
-
-          {/* Fast Role Switcher & Mobile Menu Trigger */}
+          {/* User Session / Login Portals */}
           <div className="flex items-center gap-2">
-            <div className="hidden sm:flex items-center gap-1 p-1 rounded-xl bg-slate-900 border border-slate-800 text-xs">
-              {(["USER", "STAFF", "ADMIN"] as const).map((role) => (
-                <button
-                  key={role}
-                  onClick={() => switchRole(role)}
-                  className={`px-2.5 py-1 rounded-lg font-semibold tracking-wide transition-all ${
-                    activeRole === role
-                      ? role === "ADMIN"
-                        ? "bg-purple-600 text-white shadow-sm"
-                        : role === "STAFF"
-                        ? "bg-amber-600 text-white shadow-sm"
-                        : "bg-indigo-600 text-white shadow-sm"
-                      : "text-slate-400 hover:text-slate-200"
+            {!loading && user ? (
+              <div className="flex items-center gap-2">
+                {/* Verified Role Badge */}
+                <div
+                  className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold border ${
+                    user.role === "ADMIN"
+                      ? "bg-purple-500/10 border-purple-500/30 text-purple-300"
+                      : user.role === "STAFF"
+                      ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                      : "bg-indigo-500/10 border-indigo-500/30 text-indigo-300"
                   }`}
                 >
-                  {role}
-                </button>
-              ))}
-            </div>
+                  {user.role === "ADMIN" ? (
+                    <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
+                  ) : user.role === "STAFF" ? (
+                    <Shield className="w-3.5 h-3.5 text-amber-400" />
+                  ) : (
+                    <User className="w-3.5 h-3.5 text-indigo-400" />
+                  )}
+                  <span>{user.role === "ADMIN" ? "Admin" : user.role === "STAFF" ? "Staff" : "Passenger"}</span>
+                </div>
 
-            {/* Mobile Menu Button */}
-            <div className="flex xl:hidden items-center">
+                {/* Logout Button */}
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 hover:text-white transition-colors"
+                  title="Sign out"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Sign Out</span>
+                </button>
+              </div>
+            ) : !loading ? (
+              <div className="flex items-center gap-2">
+                {/* Passenger Login */}
+                <Link
+                  href="/login"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition-all"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Sign In</span>
+                </Link>
+
+                {/* Staff / Admin Portal Quick Links (Desktop) */}
+                <div className="hidden md:flex items-center gap-1 text-[11px] text-slate-400 pl-1 border-l border-slate-800">
+                  <Link
+                    href="/staff/login"
+                    className="px-2 py-1 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-900 transition-colors"
+                  >
+                    Staff
+                  </Link>
+                  <Link
+                    href="/admin/login"
+                    className="px-2 py-1 rounded-lg text-slate-400 hover:text-purple-400 hover:bg-slate-900 transition-colors"
+                  >
+                    Admin
+                  </Link>
+                </div>
+              </div>
+            ) : null}
+
+            {/* Mobile Menu Toggle Button */}
+            <div className="flex lg:hidden items-center">
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none"
@@ -168,55 +255,29 @@ export function Navbar() {
 
       {/* Mobile Drawer */}
       {mobileMenuOpen && (
-        <div className="xl:hidden glass-panel border-b border-slate-800 px-4 pt-3 pb-6 space-y-3">
-          {/* Mobile Dedicated Fast Switch Row */}
-          <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-950 rounded-xl border border-slate-800 text-center text-xs">
-            <Link
-              href="/qr/generate"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-2 px-1 rounded-lg bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 font-bold flex flex-col items-center gap-1"
-            >
-              <QrCode className="w-4 h-4 text-indigo-400" />
-              <span>QR Gen</span>
-            </Link>
-
-            <Link
-              href="/qr/validate"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-2 px-1 rounded-lg bg-blue-600/20 text-blue-300 border border-blue-500/30 font-bold flex flex-col items-center gap-1"
-            >
-              <ShieldCheck className="w-4 h-4 text-blue-400" />
-              <span>Validator</span>
-            </Link>
-
-            <Link
-              href="/sos"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-2 px-1 rounded-lg bg-rose-600/25 text-rose-300 border border-rose-500/40 font-bold flex flex-col items-center gap-1"
-            >
-              <ShieldAlert className="w-4 h-4 text-rose-400 animate-pulse" />
-              <span>SOS Alert</span>
-            </Link>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-center">
-            {(["USER", "STAFF", "ADMIN"] as const).map((role) => (
+        <div className="lg:hidden glass-panel border-b border-slate-800 px-4 pt-3 pb-6 space-y-4">
+          {/* User Session Info if Logged In */}
+          {user && (
+            <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-white">{user.email || "Authenticated User"}</div>
+                <div className="text-[11px] text-indigo-400 font-semibold">{user.role} Role</div>
+              </div>
               <button
-                key={role}
                 onClick={() => {
-                  switchRole(role);
                   setMobileMenuOpen(false);
+                  handleLogout();
                 }}
-                className={`py-1.5 rounded-md font-semibold ${
-                  activeRole === role ? "bg-indigo-600 text-white" : "text-slate-400"
-                }`}
+                className="px-3 py-1.5 rounded-xl bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white text-xs font-bold border border-rose-500/30 transition-all flex items-center gap-1"
               >
-                {role}
+                <LogOut className="w-3 h-3" />
+                <span>Logout</span>
               </button>
-            ))}
-          </div>
+            </div>
+          )}
 
-          <div className="grid grid-cols-2 gap-2">
+          {/* Navigation Links */}
+          <div className="grid grid-cols-1 gap-2">
             {navLinks.map((link) => {
               const Icon = link.icon;
               const isActive = pathname.startsWith(link.href);
@@ -225,22 +286,54 @@ export function Navbar() {
                   key={link.href}
                   href={link.href}
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-2 p-2.5 rounded-lg text-xs font-medium ${
+                  className={`flex items-center gap-2.5 p-3 rounded-xl text-xs font-medium ${
                     link.emergency
-                      ? "bg-rose-500/10 border border-rose-500/30 text-rose-300"
+                      ? "bg-rose-500/10 border border-rose-500/30 text-rose-300 font-bold"
                       : link.highlight
-                      ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold col-span-2 text-center justify-center"
+                      ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold"
                       : isActive
                       ? "bg-slate-800 text-white border border-slate-700"
                       : "text-slate-400 hover:text-white hover:bg-slate-800/60"
                   }`}
                 >
                   <Icon className="w-4 h-4" />
-                  {link.label}
+                  <span>{link.label}</span>
                 </Link>
               );
             })}
           </div>
+
+          {/* Separate Login Portals Navigation if Unauthenticated */}
+          {!user && (
+            <div className="pt-2 border-t border-slate-800 space-y-2">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block">
+                Access Portals
+              </span>
+              <div className="grid grid-cols-3 gap-2">
+                <Link
+                  href="/login"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="p-2 rounded-xl bg-indigo-600/10 border border-indigo-500/30 text-indigo-400 text-xs font-bold text-center"
+                >
+                  Passenger
+                </Link>
+                <Link
+                  href="/staff/login"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="p-2 rounded-xl bg-amber-600/10 border border-amber-500/30 text-amber-400 text-xs font-bold text-center"
+                >
+                  Staff
+                </Link>
+                <Link
+                  href="/admin/login"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="p-2 rounded-xl bg-purple-600/10 border border-purple-500/30 text-purple-400 text-xs font-bold text-center"
+                >
+                  Admin
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </header>

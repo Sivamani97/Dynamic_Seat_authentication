@@ -39,6 +39,20 @@ export default function DynamicQrReaderPage() {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [fetchingDemoToken, setFetchingDemoToken] = useState<boolean>(false);
+  const [authRole, setAuthRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.authenticated && data.user) {
+          setAuthRole(data.user.role);
+        } else {
+          setAuthRole(null);
+        }
+      })
+      .catch(() => setAuthRole(null));
+  }, []);
 
   const qrRegionId = "html5qr-reader-region";
   const scannerRef = useRef<Html5Qrcode | null>(null);
@@ -189,6 +203,21 @@ export default function DynamicQrReaderPage() {
         <p className="text-xs text-slate-400 max-w-md mx-auto">
           The passenger displays their 30-second regenerating dynamic QR. This reader validates the cryptographic HMAC signature, checks 30s expiration (+-5s clock skew), enforces single-use nonces, and verifies seat allocation.
         </p>
+
+        {/* Staff/Admin Session Indicator */}
+        {authRole === "STAFF" || authRole === "ADMIN" ? (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Authorized Scanner Session ({authRole})</span>
+          </div>
+        ) : (
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs bg-amber-500/10 border border-amber-500/30 text-amber-300">
+            <span>Staff or Admin authentication required to scan.</span>
+            <a href="/staff/login" className="font-bold underline text-amber-400 hover:text-amber-200">
+              Staff Login →
+            </a>
+          </div>
+        )}
 
         {/* Reader Mode Selector */}
         <div className="pt-2 flex items-center justify-center gap-2">
