@@ -7,8 +7,8 @@ describe("Seat Hold Authorization & Concurrency Suite", () => {
   const sampleEventId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
   const sampleSeatId = "a1200000-0000-0000-0000-000000000a12";
 
-  const userAlice = { id: "11111111-1111-1111-1111-111111111111", email: "alice@demo.com" };
-  const userBob = { id: "22222222-2222-2222-2222-222222222222", email: "bob@demo.com" };
+  const userAlice = { id: "11111111-1111-1111-1111-111111111111", email: "alice@demo.com", role: "USER" as const };
+  const userBob = { id: "22222222-2222-2222-2222-222222222222", email: "bob@demo.com", role: "USER" as const };
 
   beforeEach(() => {
     vi.restoreAllMocks();

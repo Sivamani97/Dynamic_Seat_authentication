@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
-import { getAdminClient, logAuditEvent } from "@/lib/supabase/server";
+import { getAdminClient, logAuditEvent, getAuthenticatedUser } from "@/lib/supabase/server";
 import { verifyDynamicToken } from "@/lib/tokens";
 import { ScanSeatSchema } from "@/lib/schemas";
 import { checkRateLimit } from "@/lib/ratelimit";
@@ -10,7 +9,33 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   const supabase = getAdminClient();
 
-  // 1. Rate Limiting Check
+  // 1. Enforce Authenticated STAFF or ADMIN Session
+  // In this software-only demo, simulated seat scanning requires verified staff or admin credentials.
+  // Predictable client-derived secrets (e.g. smartseat_secret_<unit>) are rejected as authentication.
+  const authUser = await getAuthenticatedUser(request, supabase);
+  if (!authUser) {
+    return NextResponse.json(
+      {
+        success: false,
+        reasonCode: "UNAUTHORIZED",
+        message: "Staff or Admin authentication required for seat unit scanning.",
+      },
+      { status: 401 }
+    );
+  }
+
+  if (!["STAFF", "ADMIN"].includes(authUser.role)) {
+    return NextResponse.json(
+      {
+        success: false,
+        reasonCode: "FORBIDDEN",
+        message: "Passengers are not authorized to operate seat unit scanners.",
+      },
+      { status: 403 }
+    );
+  }
+
+  // 2. Validate Request Body
   let body: any;
   try {
     body = await request.json();
@@ -33,8 +58,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { token, unitId, unitSecret } = parseResult.data;
+  const { token, unitId } = parseResult.data;
 
+  // 3. Rate Limiting Check
   const rateLimit = await checkRateLimit(`scan_seat_${unitId}`, supabase, 40, 60);
   if (!rateLimit.success) {
     return NextResponse.json(
@@ -47,7 +73,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 2. Authenticate Virtual Seat Unit
+  // 4. Validate Virtual Seat Unit exists in database
   const { data: seatUnit, error: uErr } = await supabase
     .from("seat_units")
     .select(
@@ -69,29 +95,13 @@ export async function POST(request: NextRequest) {
         reasonCode: "INVALID_SEAT_UNIT",
         message: `Virtual seat unit ${unitId} is not recognized.`,
       },
-      { status: 401 }
-    );
-  }
-
-  const hashedProvidedSecret = crypto
-    .createHash("sha256")
-    .update(unitSecret)
-    .digest("hex");
-
-  if (hashedProvidedSecret !== seatUnit.secret_hash) {
-    return NextResponse.json(
-      {
-        success: false,
-        reasonCode: "INVALID_UNIT_SECRET",
-        message: "Invalid API key/secret for this seat unit.",
-      },
-      { status: 403 }
+      { status: 404 }
     );
   }
 
   const seat = seatUnit.seat as any;
 
-  // 3. Decode Token Payload
+  // 5. Decode Token Payload
   let rawPayload: any;
   try {
     const [payloadB64] = token.split(".");
@@ -104,7 +114,8 @@ export async function POST(request: NextRequest) {
       seatId: seatUnit.seat_id,
       seatLabel: seat?.label,
       status: "FAILED",
-      actorRole: "SYSTEM",
+      actorId: authUser.id,
+      actorRole: authUser.role,
       meta: { reason: "CORRUPT_TOKEN" },
     });
     return NextResponse.json(
@@ -117,7 +128,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 4. Fetch Booking
+  // 6. Fetch Booking
   const { data: booking, error: bErr } = await supabase
     .from("bookings")
     .select(
@@ -143,7 +154,8 @@ export async function POST(request: NextRequest) {
       seatId: seatUnit.seat_id,
       seatLabel: seat?.label,
       status: "FAILED",
-      actorRole: "SYSTEM",
+      actorId: authUser.id,
+      actorRole: authUser.role,
       meta: { reason: "BOOKING_NOT_FOUND", bid: rawPayload.bid },
     });
     return NextResponse.json(
@@ -156,7 +168,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 5. CRITICAL CHECK: Does Token Seat Match Scanning Unit's Seat?
+  // 7. CRITICAL CHECK: Does Token Seat Match Scanning Unit's Seat?
   // e.g. A12 credential scanned at A13 must fail and log WRONG_SEAT_SCAN!
   if (booking.seat_id !== seatUnit.seat_id || rawPayload.sid !== seatUnit.seat_id) {
     await logAuditEvent(supabase, {
@@ -167,7 +179,8 @@ export async function POST(request: NextRequest) {
       seatLabel: seat?.label,
       unitId,
       status: "FAILED",
-      actorRole: "SYSTEM",
+      actorId: authUser.id,
+      actorRole: authUser.role,
       meta: {
         bookedSeatId: booking.seat_id,
         bookedSeatLabel: (booking.seat as any)?.label,
@@ -188,7 +201,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 6. Cryptographically Verify Signature and Expiration (+-5s clock skew)
+  // 8. Cryptographically Verify Signature and Expiration (+-5s clock skew)
   const verifyResult = verifyDynamicToken(token, booking.booking_secret, {
     clockSkewSec: 5,
   });
@@ -202,7 +215,8 @@ export async function POST(request: NextRequest) {
       seatLabel: seat?.label,
       unitId,
       status: "FAILED",
-      actorRole: "SYSTEM",
+      actorId: authUser.id,
+      actorRole: authUser.role,
       meta: {
         reasonCode: verifyResult.reasonCode,
         reasonMessage: verifyResult.reasonMessage,
@@ -222,7 +236,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 7. Check Booking Status
+  // 9. Check Booking Status
   if (booking.status === "CANCELLED") {
     return NextResponse.json(
       {
@@ -234,7 +248,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 8. Replay Check in used_tokens
+  // 10. Replay Check in used_tokens
   const expiresAtDate = new Date(verifyResult.payload.exp * 1000).toISOString();
   const { error: nonceError } = await supabase.from("used_tokens").insert({
     nonce: verifyResult.payload.nonce,
@@ -252,7 +266,8 @@ export async function POST(request: NextRequest) {
       seatLabel: seat?.label,
       unitId,
       status: "FAILED",
-      actorRole: "SYSTEM",
+      actorId: authUser.id,
+      actorRole: authUser.role,
       meta: { reason: "REPLAYED_TOKEN", nonce: verifyResult.payload.nonce },
     });
 
@@ -266,7 +281,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 9. Update Booking Status: SEAT_AUTHORIZED
+  // 11. Update Booking Status: SEAT_AUTHORIZED
   const nowIso = new Date().toISOString();
   await supabase
     .from("bookings")
@@ -277,7 +292,7 @@ export async function POST(request: NextRequest) {
     })
     .eq("id", booking.id);
 
-  // 10. Update Seat State: Authorization = 'AUTHORIZED', state = 'AUTHORIZED'
+  // 12. Update Seat State: Authorization = 'AUTHORIZED', state = 'AUTHORIZED'
   await supabase
     .from("seat_states")
     .upsert(
@@ -292,7 +307,7 @@ export async function POST(request: NextRequest) {
       { onConflict: "seat_id,event_id" }
     );
 
-  // 11. Auto-resolve any existing WRONG_SEAT alerts for this seat
+  // 13. Auto-resolve any existing WRONG_SEAT alerts for this seat
   await supabase
     .from("alerts")
     .update({
@@ -304,7 +319,7 @@ export async function POST(request: NextRequest) {
     .eq("status", "NEW")
     .eq("type", "WRONG_SEAT");
 
-  // 12. Log SEAT_AUTHORIZED to Immutable Hash Chain
+  // 14. Log SEAT_AUTHORIZED to Immutable Hash Chain
   await logAuditEvent(supabase, {
     eventType: "SEAT_AUTHORIZED",
     bookingId: booking.id,
@@ -313,7 +328,8 @@ export async function POST(request: NextRequest) {
     seatLabel: seat?.label,
     unitId,
     status: "SUCCESS",
-    actorRole: "SYSTEM",
+    actorId: authUser.id,
+    actorRole: authUser.role,
     meta: {
       seatAuthorizedAt: nowIso,
       seatLabel: seat?.label,

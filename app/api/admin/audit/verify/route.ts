@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminClient } from "@/lib/supabase/server";
+import { getAdminClient, getAuthenticatedUser } from "@/lib/supabase/server";
 import { verifyAuditChain } from "@/lib/audit";
 import { AuditRecord } from "@/lib/types";
 
@@ -8,7 +8,23 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const supabase = getAdminClient();
 
-  // Load audit log entries ordered by ID ascending
+  // 1. Enforce admin role authentication
+  const user = await getAuthenticatedUser(request, supabase);
+  if (!user) {
+    return NextResponse.json(
+      { success: false, message: "Authentication required. Please log in." },
+      { status: 401 }
+    );
+  }
+
+  if (user.role !== "ADMIN") {
+    return NextResponse.json(
+      { success: false, message: "Forbidden: Admin access required." },
+      { status: 403 }
+    );
+  }
+
+  // 2. Load audit log entries ordered by ID ascending
   const { data: records, error } = await supabase
     .from("audit_log")
     .select("*")

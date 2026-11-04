@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminClient, logAuditEvent } from "@/lib/supabase/server";
+import { getAdminClient, logAuditEvent, getAuthenticatedUser } from "@/lib/supabase/server";
 import { SeatAssistSchema } from "@/lib/schemas";
 import { checkRateLimit } from "@/lib/ratelimit";
 
@@ -12,7 +12,16 @@ export async function POST(
   const unitId = params.id;
   const supabase = getAdminClient();
 
-  // 1. Rate Limiting Check
+  // 1. Enforce Authentication for Hardware Simulation Endpoint
+  const authUser = await getAuthenticatedUser(request, supabase);
+  if (!authUser || !["STAFF", "ADMIN"].includes(authUser.role)) {
+    return NextResponse.json(
+      { success: false, message: "Authentication required: Seat-unit hardware simulation is restricted to staff or admin." },
+      { status: 401 }
+    );
+  }
+
+  // 2. Rate Limiting Check
   const rateLimit = await checkRateLimit(`assist_${unitId}`, supabase, 5, 30);
   if (!rateLimit.success) {
     return NextResponse.json(

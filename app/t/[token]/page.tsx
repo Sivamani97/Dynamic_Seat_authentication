@@ -52,6 +52,13 @@ export default function SecureTicketPage({
   const [assistNote, setAssistNote] = useState<string>("");
   const [assistStatus, setAssistStatus] = useState<string | null>(null);
   const [assistSubmitting, setAssistSubmitting] = useState<boolean>(false);
+  const [confirmUnderstood, setConfirmUnderstood] = useState<boolean>(false);
+  const [activeAlert, setActiveAlert] = useState<{
+    id: string;
+    status: string;
+    priority: string;
+    message?: string;
+  } | null>(null);
 
   // Realtime Seat State & Awareness
   const [seatOccupancy, setSeatOccupancy] = useState<string>("EMPTY");
@@ -128,6 +135,32 @@ export default function SecureTicketPage({
     };
   }, []);
 
+  // Fetch existing active alert state across page refreshes
+  useEffect(() => {
+    if (!data?.booking?.id) return;
+    const fetchAlertStatus = async () => {
+      try {
+        const res = await fetch(`/api/user/assist?bookingId=${data.booking.id}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.hasActiveAlert && json.alert) {
+            setActiveAlert(json.alert);
+            setAssistStatus(
+              json.alert.status === "ACKNOWLEDGED"
+                ? "Help is on the way! Staff acknowledged your request."
+                : "Active assistance request registered with venue staff."
+            );
+          } else {
+            setActiveAlert(null);
+          }
+        }
+      } catch {
+        // Ignore network errors during background check
+      }
+    };
+    fetchAlertStatus();
+  }, [data?.booking?.id]);
+
   // Supabase Realtime subscription on seat_states & alerts for instant seat awareness
   useEffect(() => {
     if (!data?.booking?.id) return;
@@ -146,10 +179,26 @@ export default function SecureTicketPage({
         },
         (payload: any) => {
           if (payload.new.status === "ACKNOWLEDGED") {
+            setActiveAlert(payload.new);
             setAssistStatus("Help is on the way! Staff acknowledged your request.");
             soundManager.triggerVibration([200, 100, 200]);
           } else if (payload.new.status === "RESOLVED") {
+            setActiveAlert(null);
             setAssistStatus("Assistance resolved. Thank you!");
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "alerts",
+          filter: `booking_id=eq.${data.booking.id}`,
+        },
+        (payload: any) => {
+          if (payload.new.type === "SOS") {
+            setActiveAlert(payload.new);
           }
         }
       )
@@ -205,8 +254,14 @@ export default function SecureTicketPage({
       const resJson = await res.json();
       if (res.ok) {
         setAssistStatus("Request registered with staff. Help is on the way!");
+        setActiveAlert({
+          id: resJson.alertId,
+          status: resJson.status || "NEW",
+          priority: resJson.priority || "HIGH",
+          message: resJson.message,
+        });
         soundManager.triggerVibration([300]);
-        setTimeout(() => setShowAssistModal(false), 2500);
+        setTimeout(() => setShowAssistModal(false), 2000);
       } else {
         setAssistStatus(resJson.message || "Failed to submit request.");
       }
@@ -417,14 +472,37 @@ export default function SecureTicketPage({
           )}
         </div>
 
+        {/* Active SOS Status Alert if in progress */}
+        {activeAlert && (
+          <div className="mt-5 p-4 rounded-2xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs flex items-center justify-between gap-3 animate-pulse">
+            <div className="flex items-center gap-2.5">
+              <LifeBuoy className="w-5 h-5 text-rose-400 shrink-0" />
+              <div>
+                <div className="font-bold text-rose-200">
+                  {activeAlert.status === "ACKNOWLEDGED"
+                    ? "Staff Responding to Your Seat"
+                    : "Assistance Request Dispatched"}
+                </div>
+                <div className="text-[11px] text-rose-300/80">
+                  Status: <span className="font-mono font-bold uppercase">{activeAlert.status}</span> • Priority: {activeAlert.priority}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Single Assistance / SOS Button */}
         <div className="mt-5 pt-4 border-t border-slate-800">
           <button
             onClick={handleAssistClick}
-            className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-rose-600 via-rose-700 to-amber-700 text-white font-bold text-sm shadow-lg shadow-rose-600/30 hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-2"
+            className={`w-full py-3 px-4 rounded-xl font-bold text-sm shadow-lg transition-all flex items-center justify-center gap-2 ${
+              activeAlert
+                ? "bg-rose-950/80 text-rose-300 border border-rose-600/40 shadow-rose-950/20"
+                : "bg-gradient-to-r from-rose-600 via-rose-700 to-amber-700 text-white shadow-rose-600/30 hover:scale-[1.01] active:scale-[0.99]"
+            }`}
           >
             <LifeBuoy className="w-4 h-4" />
-            Request Assistance / SOS
+            {activeAlert ? "View / Update Assistance Status" : "Request Assistance / SOS"}
           </button>
         </div>
 
@@ -465,9 +543,23 @@ export default function SecureTicketPage({
               </button>
             </div>
 
+            {/* Demonstration Only Disclaimer */}
+            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] flex items-start gap-2">
+              <Info className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+              <span>
+                <strong>Demonstration only:</strong> This application simulates in-venue staff assistance dispatch and does not contact 911/112 emergency services.
+              </span>
+            </div>
+
             {assistStatus && (
               <div className="p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-xs text-indigo-300">
                 {assistStatus}
+              </div>
+            )}
+
+            {activeAlert && (
+              <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">
+                An active request is currently registered for Seat {data.booking.seatLabel} (Status: {activeAlert.status}). Staff has already been notified.
               </div>
             )}
 
@@ -520,13 +612,30 @@ export default function SecureTicketPage({
               />
             </div>
 
+            {/* Explicit Confirmation Checkbox to prevent accidental triggers */}
+            {!activeAlert && (
+              <label className="flex items-start gap-2 text-xs text-slate-300 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={confirmUnderstood}
+                  onChange={(e) => setConfirmUnderstood(e.target.checked)}
+                  className="mt-0.5 rounded border-slate-700 bg-slate-900 text-rose-600 focus:ring-rose-500"
+                />
+                <span>I confirm this is an intentional request for venue staff assistance.</span>
+              </label>
+            )}
+
             <div className="flex gap-2 pt-2">
               <button
                 onClick={submitAssistance}
-                disabled={assistSubmitting}
-                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md shadow-rose-600/30 transition-all"
+                disabled={assistSubmitting || (!activeAlert && !confirmUnderstood)}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold text-xs shadow-md shadow-rose-600/30 transition-all"
               >
-                {assistSubmitting ? "Dispatching..." : "Send to Venue Staff"}
+                {assistSubmitting
+                  ? "Dispatching..."
+                  : activeAlert
+                  ? "Update Request"
+                  : "Send to Venue Staff"}
               </button>
               <button
                 onClick={() => setShowAssistModal(false)}

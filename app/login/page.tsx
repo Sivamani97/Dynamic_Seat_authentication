@@ -1,13 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Lock, Mail, ArrowRight, ShieldCheck, RefreshCw, KeyRound, UserCheck } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Lock, Mail, ArrowRight, RefreshCw, KeyRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTarget = searchParams.get("redirect");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -28,23 +31,24 @@ export default function LoginPage() {
 
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: demo.email,
         password: demo.pass,
       });
 
-      // Save role in local storage for local fast preview
-      localStorage.setItem("smartseat_role", demo.role);
-
       if (error) {
-        // If Supabase project is dummy or local mock, still navigate for presentation!
-        console.warn("Supabase Auth notice:", error.message);
+        setErrorMsg(`Authentication failed: ${error.message}`);
+        setLoading(false);
+        return;
       }
 
-      router.push(demo.path);
-    } catch {
-      localStorage.setItem("smartseat_role", demo.role);
-      router.push(demo.path);
+      if (data?.user) {
+        // If there was a specific redirect destination requested, prioritize it
+        const destination = redirectTarget || demo.path;
+        router.push(destination);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || "An unexpected error occurred during login.");
     } finally {
       setLoading(false);
     }
@@ -68,9 +72,13 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/tickets");
+      if (data?.user) {
+        const destination = redirectTarget || "/tickets";
+        router.push(destination);
+      }
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to log in");
+    } finally {
       setLoading(false);
     }
   };
@@ -84,12 +92,12 @@ export default function LoginPage() {
           </div>
           <h1 className="text-2xl font-black text-white">SmartSeat Access</h1>
           <p className="text-xs text-slate-400">
-            Sign in with your role-assigned credentials
+            Sign in with your verified credentials
           </p>
         </div>
 
         {errorMsg && (
-          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs text-center">
+          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs text-center font-medium">
             {errorMsg}
           </div>
         )}
@@ -97,7 +105,7 @@ export default function LoginPage() {
         {/* 1-Click Demo Accounts */}
         <div className="space-y-2">
           <span className="text-[11px] uppercase tracking-wider font-bold text-slate-400 block text-center">
-            One-Click Demo Switcher
+            One-Click Verified Demo Accounts
           </span>
           <div className="grid grid-cols-2 gap-2">
             {demoLogins.map((demo) => (
@@ -178,5 +186,13 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-24 text-slate-400 text-xs">Loading SmartSeat Login...</div>}>
+      <LoginForm />
+    </Suspense>
   );
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminClient, logAuditEvent } from "@/lib/supabase/server";
+import { getAdminClient, logAuditEvent, getAuthenticatedUser } from "@/lib/supabase/server";
 import { verifyDynamicToken } from "@/lib/tokens";
 import { ScanEntrySchema } from "@/lib/schemas";
 import { checkRateLimit } from "@/lib/ratelimit";
@@ -9,7 +9,31 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   const supabase = getAdminClient();
 
-  // 1. Rate Limiting Check (by client IP or fallback header)
+  // 1. Enforce Staff/Admin Authentication
+  const user = await getAuthenticatedUser(request, supabase);
+  if (!user) {
+    return NextResponse.json(
+      {
+        success: false,
+        reasonCode: "UNAUTHORIZED",
+        message: "Staff or Admin authentication required for entry gate scanning.",
+      },
+      { status: 401 }
+    );
+  }
+
+  if (!["STAFF", "ADMIN"].includes(user.role)) {
+    return NextResponse.json(
+      {
+        success: false,
+        reasonCode: "FORBIDDEN",
+        message: "Passengers are not authorized to operate entry gate scanners.",
+      },
+      { status: 403 }
+    );
+  }
+
+  // 2. Rate Limiting Check (by client IP or fallback header)
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     request.headers.get("x-real-ip") ||
@@ -62,7 +86,8 @@ export async function POST(request: NextRequest) {
     await logAuditEvent(supabase, {
       eventType: "ENTRY_DENIED",
       status: "FAILED",
-      actorRole: "STAFF",
+      actorId: user.id,
+      actorRole: user.role,
       meta: { reason: "CORRUPT_TOKEN_FORMAT" },
     });
     return NextResponse.json(
@@ -99,7 +124,8 @@ export async function POST(request: NextRequest) {
     await logAuditEvent(supabase, {
       eventType: "ENTRY_DENIED",
       status: "FAILED",
-      actorRole: "STAFF",
+      actorId: user.id,
+      actorRole: user.role,
       meta: { reason: "BOOKING_NOT_FOUND", bid: rawPayload.bid },
     });
     return NextResponse.json(
@@ -124,7 +150,8 @@ export async function POST(request: NextRequest) {
       bookingRef: booking.booking_ref,
       seatId: booking.seat_id,
       seatLabel: (booking.seat as any)?.label,
-      actorRole: "STAFF",
+      actorId: user.id,
+      actorRole: user.role,
       status: "FAILED",
       meta: {
         reasonCode: verifyResult.reasonCode,
@@ -153,7 +180,8 @@ export async function POST(request: NextRequest) {
       eventType: "ENTRY_DENIED",
       bookingId: booking.id,
       bookingRef: booking.booking_ref,
-      actorRole: "STAFF",
+      actorId: user.id,
+      actorRole: user.role,
       status: "FAILED",
       meta: { reason: "WRONG_EVENT", scannedEventId: eventId, ticketEventId: booking.event_id },
     });
@@ -174,7 +202,8 @@ export async function POST(request: NextRequest) {
       eventType: "ENTRY_DENIED",
       bookingId: booking.id,
       bookingRef: booking.booking_ref,
-      actorRole: "STAFF",
+      actorId: user.id,
+      actorRole: user.role,
       status: "FAILED",
       meta: { reason: "TICKET_CANCELLED" },
     });
@@ -195,7 +224,8 @@ export async function POST(request: NextRequest) {
       eventType: "ENTRY_DENIED",
       bookingId: booking.id,
       bookingRef: booking.booking_ref,
-      actorRole: "STAFF",
+      actorId: user.id,
+      actorRole: user.role,
       status: "FAILED",
       meta: {
         reason: "ALREADY_CHECKED_IN",
@@ -229,7 +259,8 @@ export async function POST(request: NextRequest) {
       eventType: "ENTRY_DENIED",
       bookingId: booking.id,
       bookingRef: booking.booking_ref,
-      actorRole: "STAFF",
+      actorId: user.id,
+      actorRole: user.role,
       status: "FAILED",
       meta: {
         reason: "REPLAYED_TOKEN",
@@ -265,7 +296,8 @@ export async function POST(request: NextRequest) {
     bookingRef: booking.booking_ref,
     seatId: booking.seat_id,
     seatLabel: (booking.seat as any)?.label,
-    actorRole: "STAFF",
+    actorId: user.id,
+    actorRole: user.role,
     status: "SUCCESS",
     meta: {
       checkedInAt: nowIso,

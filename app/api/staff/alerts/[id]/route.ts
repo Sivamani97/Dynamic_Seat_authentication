@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminClient, logAuditEvent } from "@/lib/supabase/server";
+import { getAdminClient, logAuditEvent, getAuthenticatedUser } from "@/lib/supabase/server";
 import { AlertActionSchema } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +10,22 @@ export async function POST(
 ) {
   const alertId = params.id;
   const supabase = getAdminClient();
+
+  // 1. Enforce authentication and role (STAFF or ADMIN only)
+  const user = await getAuthenticatedUser(request, supabase);
+  if (!user) {
+    return NextResponse.json(
+      { success: false, message: "Authentication required. Please log in." },
+      { status: 401 }
+    );
+  }
+
+  if (!["STAFF", "ADMIN"].includes(user.role)) {
+    return NextResponse.json(
+      { success: false, message: "Forbidden: You do not have permission to access this resource." },
+      { status: 403 }
+    );
+  }
 
   let body: any = {};
   try {
@@ -103,14 +119,15 @@ export async function POST(
     );
   }
 
-  // Append to Audit Chain
+  // Append to Audit Chain with verified actor details
   await logAuditEvent(supabase, {
     eventType: auditEventType,
     bookingId: alert.booking_id,
     seatId: alert.seat_id,
     seatLabel: (alert.seat as any)?.label,
     unitId: alert.unit_id,
-    actorRole: "STAFF",
+    actorId: user.id,
+    actorRole: user.role,
     status: "SUCCESS",
     meta: {
       alertId,

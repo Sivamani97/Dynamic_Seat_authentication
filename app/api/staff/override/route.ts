@@ -1,11 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminClient, logAuditEvent } from "@/lib/supabase/server";
+import { getAdminClient, logAuditEvent, getAuthenticatedUser } from "@/lib/supabase/server";
 import { ManualOverrideSchema } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   const supabase = getAdminClient();
+
+  // 1. Enforce authentication and role (STAFF or ADMIN only)
+  const user = await getAuthenticatedUser(request, supabase);
+  if (!user) {
+    return NextResponse.json(
+      { success: false, message: "Authentication required. Please log in." },
+      { status: 401 }
+    );
+  }
+
+  if (!["STAFF", "ADMIN"].includes(user.role)) {
+    return NextResponse.json(
+      { success: false, message: "Forbidden: You do not have permission to access this resource." },
+      { status: 403 }
+    );
+  }
 
   let body: any = {};
   try {
@@ -64,7 +80,8 @@ export async function POST(request: NextRequest) {
       seatId,
       seatLabel: seat?.label,
       unitId: seat?.unit_id,
-      actorRole: "STAFF",
+      actorId: user.id,
+      actorRole: user.role,
       status: "SUCCESS",
       meta: {
         action: "AUTHORIZE_SEAT",
@@ -151,7 +168,8 @@ export async function POST(request: NextRequest) {
       bookingRef: booking?.booking_ref || null,
       seatId: newSeatId,
       seatLabel: targetSeat.label,
-      actorRole: "STAFF",
+      actorId: user.id,
+      actorRole: user.role,
       status: "SUCCESS",
       meta: {
         action: "REASSIGN_SEAT",
@@ -186,7 +204,8 @@ export async function POST(request: NextRequest) {
       eventType: "MANUAL_OVERRIDE",
       seatId,
       seatLabel: seat?.label,
-      actorRole: "STAFF",
+      actorId: user.id,
+      actorRole: user.role,
       status: "SUCCESS",
       meta: { action: "RESET_STATE", reason },
     });

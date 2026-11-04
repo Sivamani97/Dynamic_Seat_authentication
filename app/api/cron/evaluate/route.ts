@@ -21,14 +21,13 @@ async function handleCronEvaluation(request: NextRequest) {
   const bearerToken = authHeader?.startsWith("Bearer ")
     ? authHeader.slice(7).trim()
     : null;
-  const querySecret = request.nextUrl.searchParams.get("secret");
-  const providedSecret = bearerToken || querySecret;
 
-  // Strict production security: fail closed if CRON_SECRET is missing or invalid
+  // Strict security: require verified Authorization: Bearer <token>.
+  // Query-string secret parameters are strictly disallowed to prevent log and referer leakage.
   if (cronSecret) {
-    if (!providedSecret || providedSecret !== cronSecret) {
+    if (!bearerToken || bearerToken !== cronSecret) {
       return NextResponse.json(
-        { error: "Unauthorized: Invalid or missing cron secret" },
+        { error: "Unauthorized: Missing or invalid Bearer cron secret" },
         { status: 401 }
       );
     }
