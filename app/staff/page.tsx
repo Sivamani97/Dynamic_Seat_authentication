@@ -113,60 +113,63 @@ export default function StaffCommandPage() {
     });
 
     setSeatMap(initialMap);
+  }, []);
 
-    // Load active alerts from the database
-    fetch("/api/staff/alerts")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.alerts && Array.isArray(data.alerts) && data.alerts.length > 0) {
+  // Track the last alerted incident ID so notifications trigger "only one time"
+  const lastAlertedIdRef = useRef<string | null>(null);
+
+  // Active Real-Time Poller on /api/staff/alerts (Every 1.5 seconds)
+  // Ensures alerts update dynamically and instantly across staff devices
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchLiveAlerts = async () => {
+      try {
+        const res = await fetch("/api/staff/alerts");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!isMounted) return;
+
+        if (data?.alerts && Array.isArray(data.alerts)) {
           setAlerts(data.alerts);
+
+          // Find active unacknowledged CRITICAL or SOS alert
           const activeCritical = data.alerts.find(
             (a: AlertItem) =>
               (a.priority === "CRITICAL" || a.type === "SOS") && a.status === "NEW"
           );
+
           if (activeCritical) {
             setHighPriorityAlert(activeCritical);
-            soundManager.startSiren();
+            // Play sound and vibration ONLY ONE TIME per new incident (never endless loops)
+            if (lastAlertedIdRef.current !== activeCritical.id) {
+              lastAlertedIdRef.current = activeCritical.id;
+              soundManager.playErrorTone();
+              soundManager.triggerVibration([250, 100, 250]);
+            }
+          } else {
+            setHighPriorityAlert(null);
           }
-        } else {
-          // Fallback initial demo alert if no database alerts exist yet
-          setAlerts([
-            {
-              id: "alert-001",
-              seat_label: "A12",
-              type: "SOS",
-              priority: "CRITICAL",
-              status: "NEW",
-              message: "Assistance requested at Seat A12: Passenger needs assistance.",
-              created_at: new Date(Date.now() - 60000).toISOString(),
-              booking_ref: "BK829173",
-            },
-          ]);
         }
-      })
-      .catch(() => {
-        setAlerts([
-          {
-            id: "alert-001",
-            seat_label: "A12",
-            type: "SOS",
-            priority: "CRITICAL",
-            status: "NEW",
-            message: "Assistance requested at Seat A12: Passenger needs assistance.",
-            created_at: new Date(Date.now() - 60000).toISOString(),
-            booking_ref: "BK829173",
-          },
-        ]);
-      });
+      } catch {}
+    };
+
+    fetchLiveAlerts();
+    const alertPollInterval = setInterval(fetchLiveAlerts, 1500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(alertPollInterval);
+    };
   }, []);
 
-  // Vercel Hobby plan client-side tick fallback: polls /api/engine/tick every 8s while staff screen is open
+  // Vercel Hobby plan client-side tick fallback: runs evaluation periodically
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
         await fetch("/api/engine/tick", { method: "POST" });
       } catch {}
-    }, 8000);
+    }, 12000);
 
     return () => clearInterval(interval);
   }, []);
@@ -220,11 +223,14 @@ export default function StaffCommandPage() {
             return [newAlert, ...prev];
           });
 
-          // High-priority alert actions: Audible Siren + Banner + Vibration
+          // High-priority alert actions: Tone + Vibration triggered EXACTLY ONCE
           if (newAlert.priority === "CRITICAL" || newAlert.type === "SOS") {
             setHighPriorityAlert(newAlert);
-            soundManager.startSiren();
-            soundManager.triggerVibration([300, 150, 300, 150, 500]);
+            if (lastAlertedIdRef.current !== newAlert.id) {
+              lastAlertedIdRef.current = newAlert.id;
+              soundManager.playErrorTone();
+              soundManager.triggerVibration([250, 100, 250]);
+            }
           } else if (newAlert.type !== "WRONG_SEAT") {
             soundManager.playErrorTone();
           }
@@ -238,10 +244,9 @@ export default function StaffCommandPage() {
           setAlerts((prev) =>
             prev.map((a) => (a.id === updatedAlert.id ? updatedAlert : a))
           );
-          // If updated alert is no longer NEW, check if any other critical alerts remain
+          // If updated alert is no longer NEW, clear high priority banner
           setHighPriorityAlert((current) => {
             if (current?.id === updatedAlert.id && updatedAlert.status !== "NEW") {
-              soundManager.stopSiren();
               return null;
             }
             return current;

@@ -174,7 +174,6 @@ export default function DynamicQrReaderPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             token: cleanToken,
-            eventId: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
           }),
         });
 

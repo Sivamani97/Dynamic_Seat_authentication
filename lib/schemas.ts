@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const ScanEntrySchema = z.object({
   token: z.string().min(1, "Token is required"),
-  eventId: z.string().uuid("Invalid event ID format"),
+  eventId: z.string().optional(),
 });
 
 export const ScanSeatSchema = z.object({

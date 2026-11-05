@@ -374,12 +374,26 @@ export async function POST(request: NextRequest) {
     },
   });
 
+  let passengerName = "Passenger";
+  if (booking.user_id) {
+    try {
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("name")
+        .eq("id", booking.user_id)
+        .maybeSingle();
+      if (prof?.name) passengerName = prof.name;
+    } catch {}
+  }
+
   return NextResponse.json({
     success: true,
     message: "SEAT AUTHORIZED",
     status: "SEAT_AUTHORIZED",
     bookingRef: booking.booking_ref,
+    passengerName,
     seatLabel: seat?.label,
-    displayMessage: `Seat ${seat?.label} ✓ Seat Verified`,
+    eventTitle: (booking.event as any)?.title,
+    displayMessage: `Seat ${seat?.label} ✓ Seat Verified & Synchronized`,
   });
 }

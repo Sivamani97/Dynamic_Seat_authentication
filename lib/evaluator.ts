@@ -213,16 +213,16 @@ export async function runSystemEvaluation(
     if (deadUnits && deadUnits.length > 0) {
       for (const unit of deadUnits) {
         const seat = unit.seat as any;
-        // Check if an alert already exists (active NEW or ACKNOWLEDGED)
-        const { data: existingAlert } = await supabase
+        // Check if ANY alert already exists for this unit ("only one time is enough")
+        const { data: existingAlerts } = await supabase
           .from("alerts")
           .select("id")
           .eq("unit_id", unit.id)
-          .eq("type", "COMM_FAILURE")
-          .in("status", ["NEW", "ACKNOWLEDGED"])
-          .maybeSingle();
+          .eq("type", "COMM_FAILURE");
 
-        if (!existingAlert) {
+        const hasExistingAlert = existingAlerts && existingAlerts.length > 0;
+
+        if (!hasExistingAlert) {
           await supabase.from("alerts").insert({
             seat_id: unit.seat_id,
             unit_id: unit.id,
