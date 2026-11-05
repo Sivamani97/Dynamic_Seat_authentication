@@ -100,6 +100,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 5. Ensure seat exists before placing hold
+    let resolvedSeatId = seatId;
     const { data: seatCheck } = await supabase
       .from("seats")
       .select("id")
@@ -107,20 +108,51 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (!seatCheck) {
-      const defaultScreenId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-      await supabase.from("seats").upsert(
-        {
-          id: seatId,
-          screen_id: defaultScreenId,
-          label: "Reserved Seat",
-          row: "A",
-          col: 1,
-          unit_id: `SCREEN2-${seatId.substring(0, 8)}`,
-          type: "STANDARD",
-          price: 16.0,
-        },
-        { onConflict: "id" }
-      );
+      const { data: altSeat } = await supabase
+        .from("seats")
+        .select("id")
+        .or(`unit_id.eq.${seatId},label.eq.${seatId}`)
+        .maybeSingle();
+
+      if (altSeat) {
+        resolvedSeatId = altSeat.id;
+      } else {
+        const defaultScreenId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+        const shortHex = seatId.replace(/[^A-Za-z0-9]/g, "").substring(0, 8);
+        const uniqueLabel = `S-${shortHex}`;
+        const uniqueUnitId = `SEAT-${shortHex}`;
+
+        const { data: newSeat } = await supabase
+          .from("seats")
+          .upsert(
+            {
+              id: seatId,
+              screen_id: defaultScreenId,
+              label: uniqueLabel,
+              row: "A",
+              col: 1,
+              unit_id: uniqueUnitId,
+              type: "STANDARD",
+              price: 16.0,
+            },
+            { onConflict: "id" }
+          )
+          .select("id")
+          .maybeSingle();
+
+        if (newSeat) {
+          resolvedSeatId = newSeat.id;
+          await supabase.from("seat_units").upsert(
+            {
+              id: uniqueUnitId,
+              seat_id: seatId,
+              secret_hash: `secret_${uniqueUnitId}`,
+              status_json: { sensor: "OK", scanner: "OK", power: "OK", comms: "OK", tamper: false },
+            },
+            { onConflict: "id" }
+          );
+        }
+      }
     }
 
     // 6. Atomically delete any expired hold for this seat before inserting new hold
@@ -128,7 +160,7 @@ export async function POST(request: NextRequest) {
       .from("seat_holds")
       .delete()
       .eq("event_id", eventId)
-      .eq("seat_id", seatId)
+      .eq("seat_id", resolvedSeatId)
       .lte("expires_at", nowIso);
 
     // 7. Atomic Insert with Postgres UNIQUE (event_id, seat_id) constraint protection
@@ -136,7 +168,7 @@ export async function POST(request: NextRequest) {
       .from("seat_holds")
       .insert({
         event_id: eventId,
-        seat_id: seatId,
+        seat_id: resolvedSeatId,
         user_id: userId,
         expires_at: holdExpiry,
       })

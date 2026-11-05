@@ -33,7 +33,14 @@ export async function GET(
     // If no seats found in database (e.g. before seed), auto-generate deterministic seats
     if (!seats || seats.length === 0) {
       const generatedSeats: any[] = [];
+      const generatedUnits: any[] = [];
       const rows = ["A", "B", "C", "D", "E"];
+
+      const screenName = (event?.screen as any)?.name;
+      const screenSlug = screenName
+        ? screenName.replace(/[^A-Za-z0-9]/g, "").slice(0, 8).toUpperCase()
+        : targetScreenId.slice(0, 8).toUpperCase();
+      const screenHex = targetScreenId.replace(/-/g, "").slice(0, 8);
 
       for (const r of rows) {
         for (let c = 1; c <= 12; c++) {
@@ -41,14 +48,17 @@ export async function GET(
           const isVip = r === "D" || r === "E";
           const rHex = r.charCodeAt(0).toString(16).padStart(4, "0");
           const cHex = c.toString(16).padStart(12, "0");
+          const isScreen2 = targetScreenId === "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
           const deterministicId =
-            label === "A12"
+            isScreen2 && label === "A12"
               ? "a1200000-0000-0000-0000-000000000a12"
-              : label === "A13"
+              : isScreen2 && label === "A13"
               ? "a1300000-0000-0000-0000-000000000a13"
-              : label === "B4"
+              : isScreen2 && label === "B4"
               ? "b0400000-0000-0000-0000-000000000b04"
-              : `00000000-${rHex}-0000-0000-${cHex}`;
+              : `${screenHex}-${rHex}-0000-0000-${cHex}`;
+
+          const unitId = `${screenSlug}-${label}`;
 
           generatedSeats.push({
             id: deterministicId,
@@ -56,15 +66,23 @@ export async function GET(
             label,
             row: r,
             col: c,
-            unit_id: `SCREEN2-${label}`,
+            unit_id: unitId,
             type: isVip ? "VIP" : "STANDARD",
             price: isVip ? 22.5 : 16.0,
+          });
+
+          generatedUnits.push({
+            id: unitId,
+            seat_id: deterministicId,
+            secret_hash: `unit_secret_${unitId}`,
+            status_json: { sensor: "OK", scanner: "OK", power: "OK", comms: "OK", tamper: false },
           });
         }
       }
 
-      // Upsert into public.seats so foreign keys work
+      // Upsert into public.seats and public.seat_units so foreign keys work
       await supabase.from("seats").upsert(generatedSeats, { onConflict: "id" });
+      await supabase.from("seat_units").upsert(generatedUnits, { onConflict: "id" });
       seats = generatedSeats;
     }
 

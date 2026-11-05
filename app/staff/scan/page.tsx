@@ -17,6 +17,7 @@ import {
   MapPin,
   Clock,
   Sparkles,
+  SwitchCamera,
 } from "lucide-react";
 import { soundManager } from "@/lib/audio";
 
@@ -46,9 +47,12 @@ export default function GateScannerPage() {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [lastDetectedAt, setLastDetectedAt] = useState<string | null>(null);
   const [countdownSec, setCountdownSec] = useState<number>(0);
+  const [availableCameras, setAvailableCameras] = useState<Array<{ id: string; label: string }>>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
 
   const qrRegionId = "html5qr-code-full-region";
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isStartingRef = useRef<boolean>(false);
   const isProcessingRef = useRef<boolean>(false);
   const lastScannedTokenRef = useRef<string>("");
   const lastScannedTimeRef = useRef<number>(0);
@@ -71,17 +75,49 @@ export default function GateScannerPage() {
   };
 
   // Initialize or stop camera scanner
-  const startCamera = async () => {
+  const startCamera = async (targetCameraId?: string) => {
+    if (isStartingRef.current) return;
+    isStartingRef.current = true;
+
     try {
       setCameraError(null);
       setScanResult(null);
       isProcessingRef.current = false;
       lastScannedTokenRef.current = "";
 
+      // Ensure any existing running instance is stopped cleanly
       if (scannerRef.current) {
         try {
-          await scannerRef.current.stop();
+          if (scannerRef.current.isScanning) {
+            await scannerRef.current.stop();
+          }
+          scannerRef.current.clear();
         } catch {}
+        scannerRef.current = null;
+      }
+
+      // Enumerate available video input devices
+      let devices: Array<{ id: string; label: string }> = [];
+      try {
+        devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          setAvailableCameras(devices);
+        }
+      } catch (enumErr) {
+        console.warn("Camera enumeration deferred until permission granted:", enumErr);
+      }
+
+      // Select target camera: specific requested -> rear/environment -> first device -> facingMode fallback
+      let cameraToUse: string | { facingMode: string } = { facingMode: "environment" };
+      if (targetCameraId) {
+        cameraToUse = targetCameraId;
+      } else if (devices && devices.length > 0) {
+        const rearCam = devices.find((d) =>
+          /back|rear|environment|main|primary|wide/i.test(d.label)
+        );
+        const chosen = rearCam || devices[0];
+        cameraToUse = chosen.id;
+        setSelectedCameraId(chosen.id);
       }
 
       const html5QrCode = new Html5Qrcode(qrRegionId);
@@ -90,56 +126,95 @@ export default function GateScannerPage() {
       const config = {
         fps: 20,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+          const w = viewfinderWidth || 300;
+          const h = viewfinderHeight || 300;
+          const minEdge = Math.min(w, h);
+          const size = Math.max(180, Math.floor(minEdge * 0.72));
           return {
-            width: Math.floor(minEdge * 0.78),
-            height: Math.floor(minEdge * 0.78),
+            width: size,
+            height: size,
           };
         },
         aspectRatio: 1.0,
       };
 
-      await html5QrCode.start(
-        { facingMode: "environment" },
-        config,
-        async (decodedText) => {
-          // Instant UPI-style auto-fetch as soon as QR enters viewfinder
-          await handleProcessToken(decodedText);
-        },
-        () => {}
-      );
+      try {
+        await html5QrCode.start(
+          cameraToUse,
+          config,
+          async (decodedText) => {
+            // Instant UPI-style auto-fetch as soon as QR enters viewfinder
+            await handleProcessToken(decodedText);
+          },
+          () => {}
+        );
+      } catch (primaryErr: any) {
+        console.warn("Primary camera start failed, attempting user-facing camera fallback:", primaryErr);
+        // Fallback to front/user-facing camera if rear camera or specific device id was rejected
+        await html5QrCode.start(
+          { facingMode: "user" },
+          config,
+          async (decodedText) => {
+            await handleProcessToken(decodedText);
+          },
+          () => {}
+        );
+      }
 
       setScanning(true);
     } catch (err: any) {
-      setCameraError(
-        err.message ||
-          "Camera access denied or unavailable. Ensure camera permission is granted or use manual token verification below."
-      );
+      const msg =
+        err.name === "NotAllowedError" || err.message?.includes("Permission")
+          ? "Camera permission denied. Please allow camera access in browser settings or address bar."
+          : err.name === "NotFoundError" || err.message?.includes("NotFound")
+          ? "No camera found on this device. You can verify tickets using the manual token input below."
+          : err.message || "Failed to initialize camera scanner. Ensure camera permission is granted.";
+      setCameraError(msg);
       setScanning(false);
+    } finally {
+      isStartingRef.current = false;
     }
   };
 
   const stopCamera = async () => {
     if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
     if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-    if (scannerRef.current && scanning) {
+    if (scannerRef.current) {
       try {
-        await scannerRef.current.stop();
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop();
+        }
         scannerRef.current.clear();
       } catch {}
-      setScanning(false);
+      scannerRef.current = null;
     }
+    setScanning(false);
+  };
+
+  const handleSwitchCamera = async () => {
+    if (availableCameras.length <= 1) return;
+    const currentIndex = availableCameras.findIndex((c) => c.id === selectedCameraId);
+    const nextIndex = (currentIndex + 1) % availableCameras.length;
+    const nextCamera = availableCameras[nextIndex];
+    setSelectedCameraId(nextCamera.id);
+    await stopCamera();
+    await startCamera(nextCamera.id);
   };
 
   useEffect(() => {
     return () => {
       if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-      if (scannerRef.current && scanning) {
-        scannerRef.current.stop().catch(() => {});
+      if (scannerRef.current) {
+        try {
+          if (scannerRef.current.isScanning) {
+            scannerRef.current.stop().catch(() => {});
+          }
+          scannerRef.current.clear();
+        } catch {}
       }
     };
-  }, [scanning]);
+  }, []);
 
   // Submit token to /api/scan/entry
   const handleProcessToken = async (rawTokenString: string) => {
@@ -358,34 +433,37 @@ export default function GateScannerPage() {
 
       {/* Camera Viewfinder */}
       <div className="glass-card rounded-3xl border border-slate-800 p-6 space-y-4">
-        <div className="relative w-full min-h-[280px] rounded-2xl bg-black/90 border border-slate-700/80 overflow-hidden flex items-center justify-center text-slate-500 text-xs text-center">
-          {/* Dedicated DOM region for html5-qrcode */}
+        {/* Aspect-ratio constrained camera container */}
+        <div className="relative w-full aspect-square max-w-[420px] mx-auto rounded-2xl bg-black border border-slate-700/80 overflow-hidden flex items-center justify-center">
+          {/* Dedicated DOM region for html5-qrcode: ALWAYS mounted and visible */}
           <div
             id={qrRegionId}
-            className={`w-full ${scanning ? "block" : "hidden"}`}
+            className="w-full h-full"
           />
 
-          {/* Viewfinder Target Reticle & Laser Beam while scanning */}
-          {scanning && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="relative w-56 h-56 border-2 border-emerald-500/60 rounded-2xl shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-                {/* Laser scan line moving up and down */}
-                <div className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_10px_#10b981] animate-pulse top-1/2" />
-                <span className="absolute -bottom-6 left-1/2 transform -translate-x-1/2 text-[10px] font-mono font-bold text-emerald-400 whitespace-nowrap bg-black/80 px-2 py-0.5 rounded-full border border-emerald-500/30">
-                  Align QR Code
-                </span>
+          {/* Idle state overlay */}
+          {!scanning && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 space-y-3 bg-slate-950/90 backdrop-blur-sm z-10 text-center pointer-events-none">
+              <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shadow-inner">
+                <Camera className="w-8 h-8" />
               </div>
+              <p className="font-bold text-white text-sm">Scanner Ready</p>
+              <p className="text-[11px] text-slate-400 max-w-xs">
+                Tap below to activate camera. Point at passenger QR ticket for instant automatic verification.
+              </p>
             </div>
           )}
 
-          {/* Idle state */}
-          {!scanning && (
-            <div className="p-6 space-y-3 pointer-events-none">
-              <Camera className="w-12 h-12 mx-auto text-slate-600" />
-              <p className="font-semibold text-slate-300">Camera is idle.</p>
-              <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
-                Click below to start instant auto-scanning.
-              </p>
+          {/* Viewfinder Target Reticle & Laser Beam while scanning */}
+          {scanning && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-10">
+              <div className="relative w-56 h-56 border-2 border-emerald-500/70 rounded-2xl shadow-[0_0_25px_rgba(16,185,129,0.35)]">
+                {/* Laser scan line moving up and down */}
+                <div className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_#10b981] animate-pulse top-1/2" />
+                <span className="absolute -bottom-6 left-1/2 transform -translate-x-1/2 text-[10px] font-mono font-bold text-emerald-400 whitespace-nowrap bg-black/90 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                  Align QR Code
+                </span>
+              </div>
             </div>
           )}
         </div>
@@ -400,22 +478,60 @@ export default function GateScannerPage() {
         <div className="flex gap-2">
           {!scanning ? (
             <button
-              onClick={startCamera}
+              onClick={() => startCamera()}
               className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 active:scale-98 transition-all"
             >
               <Camera className="w-4 h-4" />
               <span>Activate Camera Scanner</span>
             </button>
           ) : (
-            <button
-              onClick={stopCamera}
-              className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
-            >
-              Stop Camera
-            </button>
+            <>
+              {availableCameras.length > 1 && (
+                <button
+                  onClick={handleSwitchCamera}
+                  title="Switch Camera (Front/Rear)"
+                  className="py-3 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all shadow-md"
+                >
+                  <SwitchCamera className="w-4 h-4 text-emerald-400" />
+                  <span>Switch</span>
+                </button>
+              )}
+              <button
+                onClick={stopCamera}
+                className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs shadow-md transition-all"
+              >
+                Stop Camera
+              </button>
+            </>
           )}
         </div>
       </div>
+
+      {/* Global CSS to guarantee video sizing and prevent blank canvas */}
+      <style jsx global>{`
+        #${qrRegionId} {
+          position: relative !important;
+          width: 100% !important;
+          height: 100% !important;
+          border: none !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+        }
+        #${qrRegionId} video {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: cover !important;
+          border-radius: 1rem !important;
+          display: block !important;
+        }
+        #${qrRegionId} canvas {
+          border-radius: 1rem !important;
+        }
+        #${qrRegionId} #qr-shaded-region {
+          border-radius: 1rem !important;
+        }
+      `}</style>
 
       {/* Manual Token Paste Fallback */}
       <div className="glass-card rounded-3xl border border-slate-800 p-6 space-y-4">

@@ -62,6 +62,7 @@ export function QrScannerValidator({
 
   const qrRegionId = "qr-scanner-viewport-unique";
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isStartingRef = useRef<boolean>(false);
   const isProcessingRef = useRef<boolean>(false);
   const lastScannedTokenRef = useRef<string>("");
   const lastScannedTimeRef = useRef<number>(0);
@@ -85,17 +86,23 @@ export function QrScannerValidator({
   // Stop camera cleanly
   const stopCamera = async () => {
     if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
-    if (scannerRef.current && scanning) {
+    if (scannerRef.current) {
       try {
-        await scannerRef.current.stop();
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop();
+        }
         scannerRef.current.clear();
       } catch {}
-      setScanning(false);
+      scannerRef.current = null;
     }
+    setScanning(false);
   };
 
-  // Start mobile camera
+  // Start mobile camera with multi-stage fallback
   const startCamera = async (facing: "environment" | "user" = cameraFacing) => {
+    if (isStartingRef.current) return;
+    isStartingRef.current = true;
+
     try {
       setCameraError(null);
       setScanResult(null);
@@ -105,35 +112,83 @@ export function QrScannerValidator({
       // Stop previous instance if running
       if (scannerRef.current) {
         try {
-          await scannerRef.current.stop();
+          if (scannerRef.current.isScanning) {
+            await scannerRef.current.stop();
+          }
+          scannerRef.current.clear();
         } catch {}
+        scannerRef.current = null;
+      }
+
+      // Check available cameras
+      let devices: Array<{ id: string; label: string }> = [];
+      try {
+        devices = await Html5Qrcode.getCameras();
+      } catch {}
+
+      let cameraTarget: string | { facingMode: string } = { facingMode: facing };
+      if (devices && devices.length > 0) {
+        if (facing === "environment") {
+          const rearCam = devices.find((d) =>
+            /back|rear|environment|main|primary/i.test(d.label)
+          );
+          cameraTarget = rearCam ? rearCam.id : devices[0].id;
+        } else {
+          const frontCam = devices.find((d) =>
+            /front|user|selfie|face/i.test(d.label)
+          );
+          cameraTarget = frontCam ? frontCam.id : devices[0].id;
+        }
       }
 
       const html5QrCode = new Html5Qrcode(qrRegionId);
       scannerRef.current = html5QrCode;
 
       const config = {
-        fps: 15,
-        qrbox: { width: 250, height: 250 },
+        fps: 20,
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          const w = viewfinderWidth || 280;
+          const h = viewfinderHeight || 280;
+          const minEdge = Math.min(w, h);
+          const size = Math.max(180, Math.floor(minEdge * 0.72));
+          return { width: size, height: size };
+        },
         aspectRatio: 1.0,
       };
 
-      await html5QrCode.start(
-        { facingMode: facing },
-        config,
-        async (decodedText) => {
-          await handleProcessToken(decodedText);
-        },
-        () => {}
-      );
+      try {
+        await html5QrCode.start(
+          cameraTarget,
+          config,
+          async (decodedText) => {
+            await handleProcessToken(decodedText);
+          },
+          () => {}
+        );
+      } catch (firstErr: any) {
+        console.warn("Target camera start failed, attempting user camera fallback:", firstErr);
+        await html5QrCode.start(
+          { facingMode: "user" },
+          config,
+          async (decodedText) => {
+            await handleProcessToken(decodedText);
+          },
+          () => {}
+        );
+      }
 
       setScanning(true);
     } catch (err: any) {
-      setCameraError(
-        err.message ||
-          "Camera access requires HTTPS or permissions on mobile. You can test with the 1-Click Instant Validator below!"
-      );
+      const msg =
+        err.name === "NotAllowedError" || err.message?.includes("Permission")
+          ? "Camera permission denied. Please allow camera access in your browser."
+          : err.name === "NotFoundError" || err.message?.includes("NotFound")
+          ? "No camera found on this device. You can use the 1-Click Instant Validator or manual token input below."
+          : err.message || "Camera access requires HTTPS or permissions on mobile.";
+      setCameraError(msg);
       setScanning(false);
+    } finally {
+      isStartingRef.current = false;
     }
   };
 
@@ -503,6 +558,28 @@ export function QrScannerValidator({
           </div>
         )}
       </div>
+
+      <style jsx global>{`
+        #${qrRegionId} {
+          position: relative !important;
+          width: 100% !important;
+          height: 100% !important;
+          border: none !important;
+        }
+        #${qrRegionId} video {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: cover !important;
+          border-radius: 1rem !important;
+          display: block !important;
+        }
+        #${qrRegionId} canvas {
+          border-radius: 1rem !important;
+        }
+        #${qrRegionId} #qr-shaded-region {
+          border-radius: 1rem !important;
+        }
+      `}</style>
     </div>
   );
 }

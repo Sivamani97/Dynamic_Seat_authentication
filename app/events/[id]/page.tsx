@@ -190,13 +190,20 @@ export default function EventSeatMapPage({
     setErrorMessage(null);
 
     try {
+      const supabase = createClient();
+      const session = (await supabase.auth.getSession()).data.session;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+
       const res = await fetch("/api/bookings", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           eventId: targetEventId,
           seatId: selectedSeat.id,
-          userEmail: "user1@demo.com",
+          userEmail: session?.user?.email || "user1@demo.com",
         }),
       });
 

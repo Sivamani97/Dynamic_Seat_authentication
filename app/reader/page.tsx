@@ -95,19 +95,59 @@ export default function DynamicQrReaderPage() {
       isProcessingRef.current = false;
       lastScannedTokenRef.current = "";
 
+      if (scannerRef.current) {
+        try {
+          if (scannerRef.current.isScanning) {
+            await scannerRef.current.stop();
+          }
+          scannerRef.current.clear();
+        } catch {}
+        scannerRef.current = null;
+      }
+
+      let devices: Array<{ id: string; label: string }> = [];
+      try {
+        devices = await Html5Qrcode.getCameras();
+      } catch {}
+
+      let cameraTarget: string | { facingMode: string } = { facingMode: "environment" };
+      if (devices && devices.length > 0) {
+        const rearCam = devices.find((d) => /back|rear|environment|main|primary/i.test(d.label));
+        cameraTarget = rearCam ? rearCam.id : devices[0].id;
+      }
+
       const html5QrCode = new Html5Qrcode(qrRegionId);
       scannerRef.current = html5QrCode;
 
-      const config = { fps: 15, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 };
-
-      await html5QrCode.start(
-        { facingMode: "environment" },
-        config,
-        async (decodedText) => {
-          await handleProcessToken(decodedText);
+      const config = {
+        fps: 20,
+        qrbox: (w: number, h: number) => {
+          const minEdge = Math.min(w || 280, h || 280);
+          const size = Math.max(180, Math.floor(minEdge * 0.72));
+          return { width: size, height: size };
         },
-        () => {}
-      );
+        aspectRatio: 1.0,
+      };
+
+      try {
+        await html5QrCode.start(
+          cameraTarget,
+          config,
+          async (decodedText) => {
+            await handleProcessToken(decodedText);
+          },
+          () => {}
+        );
+      } catch (firstErr) {
+        await html5QrCode.start(
+          { facingMode: "user" },
+          config,
+          async (decodedText) => {
+            await handleProcessToken(decodedText);
+          },
+          () => {}
+        );
+      }
 
       setScanning(true);
     } catch (err: any) {
@@ -402,21 +442,43 @@ export default function DynamicQrReaderPage() {
           <span className="text-[11px] text-slate-400">Point at passenger&apos;s phone screen</span>
         </div>
 
-        <div className="relative w-full min-h-[250px] rounded-2xl bg-black/80 border border-slate-700/80 overflow-hidden flex items-center justify-center text-slate-500 text-xs text-center">
-          {/* Empty dedicated region for html5-qrcode DOM operations */}
+        <div className="relative w-full aspect-square max-w-[360px] mx-auto rounded-2xl bg-black border border-slate-700/80 overflow-hidden flex items-center justify-center text-slate-500 text-xs text-center">
+          {/* Empty dedicated region for html5-qrcode DOM operations: ALWAYS mounted */}
           <div
             id={qrRegionId}
-            className={`w-full ${scanning ? "block" : "hidden"}`}
+            className="w-full h-full"
           />
 
           {/* Sibling React element - safe from DOM mutation by external library */}
           {!scanning && (
-            <div className="p-6 space-y-3 pointer-events-none">
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 space-y-3 bg-slate-950/90 pointer-events-none z-10">
               <Camera className="w-10 h-10 mx-auto text-slate-600" />
               <p>Camera is currently idle. Click below to start scanning.</p>
             </div>
           )}
         </div>
+
+        <style jsx global>{`
+          #${qrRegionId} {
+            position: relative !important;
+            width: 100% !important;
+            height: 100% !important;
+            border: none !important;
+          }
+          #${qrRegionId} video {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover !important;
+            border-radius: 1rem !important;
+            display: block !important;
+          }
+          #${qrRegionId} canvas {
+            border-radius: 1rem !important;
+          }
+          #${qrRegionId} #qr-shaded-region {
+            border-radius: 1rem !important;
+          }
+        `}</style>
 
         {cameraError && (
           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
