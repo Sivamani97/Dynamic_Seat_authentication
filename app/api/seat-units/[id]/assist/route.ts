@@ -77,6 +77,24 @@ export async function POST(
   const isCritical = category === "MEDICAL" || category === "EMERGENCY";
   const priority = isCritical ? "CRITICAL" : category === "DISTURBANCE" ? "HIGH" : "MEDIUM";
 
+  // Prevent Duplicate Active SOS Alerts for the same seat/unit ("only one time is enough")
+  const { data: existingActiveAlert } = await supabase
+    .from("alerts")
+    .select("id, status, priority, created_at")
+    .eq("seat_id", seatUnit.seat_id)
+    .eq("type", "SOS")
+    .in("status", ["NEW", "ACKNOWLEDGED"])
+    .maybeSingle();
+
+  if (existingActiveAlert) {
+    return NextResponse.json({
+      success: true,
+      alertId: existingActiveAlert.id,
+      message: "Emergency assistance request already registered. Venue staff alerted.",
+      status: existingActiveAlert.status,
+    });
+  }
+
   const message = isCritical
     ? `EMERGENCY SOS at Seat ${seat?.label} (${category.replace("_", " ")}). Immediate staff response required!`
     : `Passenger assistance request at Seat ${seat?.label}: ${category.replace("_", " ")}${

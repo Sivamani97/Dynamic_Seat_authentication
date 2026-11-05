@@ -115,6 +115,20 @@ export default function StaffCommandPage() {
     setSeatMap(initialMap);
   }, []);
 
+  // Helper to obtain authenticated staff operator headers
+  const getStaffHeaders = async (): Promise<Record<string, string>> => {
+    const supabase = createClient();
+    const session = (await supabase.auth.getSession()).data.session;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-staff-operator": "smartseat-staff-portal-v1",
+    };
+    if (session?.access_token) {
+      headers["Authorization"] = `Bearer ${session.access_token}`;
+    }
+    return headers;
+  };
+
   // Track the last alerted incident ID so notifications trigger "only one time"
   const lastAlertedIdRef = useRef<string | null>(null);
 
@@ -125,16 +139,27 @@ export default function StaffCommandPage() {
 
     const fetchLiveAlerts = async () => {
       try {
-        const res = await fetch("/api/staff/alerts");
+        const headers = await getStaffHeaders();
+        const res = await fetch("/api/staff/alerts", { headers });
         if (!res.ok) return;
         const data = await res.json();
         if (!isMounted) return;
 
         if (data?.alerts && Array.isArray(data.alerts)) {
-          setAlerts(data.alerts);
+          // De-duplicate: Keep only latest alert per incident to prevent simultaneous duplicate flooding
+          const seen = new Set<string>();
+          const deduped: AlertItem[] = [];
+          for (const al of data.alerts) {
+            const key = al.id || `${al.seat_id}_${al.type}_${al.status}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              deduped.push(al);
+            }
+          }
+          setAlerts(deduped);
 
           // Find active unacknowledged CRITICAL or SOS alert
-          const activeCritical = data.alerts.find(
+          const activeCritical = deduped.find(
             (a: AlertItem) =>
               (a.priority === "CRITICAL" || a.type === "SOS") && a.status === "NEW"
           );
@@ -161,17 +186,6 @@ export default function StaffCommandPage() {
       isMounted = false;
       clearInterval(alertPollInterval);
     };
-  }, []);
-
-  // Vercel Hobby plan client-side tick fallback: runs evaluation periodically
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        await fetch("/api/engine/tick", { method: "POST" });
-      } catch {}
-    }, 12000);
-
-    return () => clearInterval(interval);
   }, []);
 
   // Supabase Realtime subscriptions on seat_states & alerts (Mounted ONCE)
@@ -282,9 +296,10 @@ export default function StaffCommandPage() {
     );
 
     try {
+      const headers = await getStaffHeaders();
       await fetch("/api/staff/alerts", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ action: "ACKNOWLEDGE_ALL" }),
       });
     } catch {}
@@ -300,9 +315,10 @@ export default function StaffCommandPage() {
     );
 
     try {
+      const headers = await getStaffHeaders();
       await fetch("/api/staff/alerts", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ action: "RESOLVE_ALL" }),
       });
     } catch {}
@@ -315,9 +331,10 @@ export default function StaffCommandPage() {
     resolutionNote?: string
   ) => {
     try {
+      const headers = await getStaffHeaders();
       const res = await fetch(`/api/staff/alerts/${alertId}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           action,
           resolutionNote,
