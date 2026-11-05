@@ -121,13 +121,7 @@ export default function DynamicQrReaderPage() {
       scannerRef.current = html5QrCode;
 
       const config = {
-        fps: 20,
-        qrbox: (w: number, h: number) => {
-          const minEdge = Math.min(w || 280, h || 280);
-          const size = Math.max(180, Math.floor(minEdge * 0.72));
-          return { width: size, height: size };
-        },
-        aspectRatio: 1.0,
+        fps: 24,
       };
 
       try {
@@ -135,6 +129,8 @@ export default function DynamicQrReaderPage() {
           cameraTarget,
           config,
           async (decodedText) => {
+            const preview = decodedText ? (decodedText.length > 16 ? decodedText.slice(0, 10) + "..." + decodedText.slice(-6) : decodedText) : "empty";
+            console.log("[Reader Scanner] QR code visually detected by camera! Raw length:", decodedText?.length, "Preview:", preview);
             await handleProcessToken(decodedText);
           },
           () => {}
@@ -144,6 +140,8 @@ export default function DynamicQrReaderPage() {
           { facingMode: "user" },
           config,
           async (decodedText) => {
+            const preview = decodedText ? (decodedText.length > 16 ? decodedText.slice(0, 10) + "..." + decodedText.slice(-6) : decodedText) : "empty";
+            console.log("[Reader Scanner] QR code visually detected on fallback camera! Raw length:", decodedText?.length, "Preview:", preview);
             await handleProcessToken(decodedText);
           },
           () => {}

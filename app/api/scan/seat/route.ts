@@ -66,6 +66,8 @@ export async function POST(request: NextRequest) {
 
   let token = parseResult.data.token.trim();
   const { unitId } = parseResult.data;
+  const tokenPreview = token.length > 16 ? token.slice(0, 8) + "..." + token.slice(-6) : token;
+  console.log(`[Seat Unit Scan API] Request received for unit: ${unitId}. Actor: ${authUser.role}, Turnstile: ${isTurnstileScanner}, Token: [${tokenPreview}]`);
 
   // Smart URL normalization: extract token if a full URL was scanned
   try {

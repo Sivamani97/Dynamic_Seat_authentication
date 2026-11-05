@@ -163,46 +163,39 @@ export default function GateScannerPage() {
         setSelectedCameraId(chosen.id);
       }
 
+      console.log("[SmartSeat Camera] Initializing Html5Qrcode instance...");
       const html5QrCode = new Html5Qrcode(qrRegionId, {
-        experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true,
-        },
         verbose: false,
       });
       scannerRef.current = html5QrCode;
 
+      // Full-frame scanning at high FPS without restrictive crop distortion
       const config = {
-        fps: 20,
-        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const w = viewfinderWidth || 320;
-          const h = viewfinderHeight || 320;
-          const minEdge = Math.min(w, h);
-          const size = Math.max(200, Math.floor(minEdge * 0.85));
-          return {
-            width: size,
-            height: size,
-          };
-        },
-        aspectRatio: 1.0,
+        fps: 24,
       };
+
+      console.log("[SmartSeat Camera] Starting video capture stream. Target camera:", typeof cameraToUse === "string" ? cameraToUse : cameraToUse.facingMode);
 
       try {
         await html5QrCode.start(
           cameraToUse,
           config,
           async (decodedText) => {
-            // Instant UPI-style auto-fetch as soon as QR enters viewfinder
+            const preview = decodedText ? (decodedText.length > 16 ? decodedText.slice(0, 10) + "..." + decodedText.slice(-6) : decodedText) : "empty";
+            console.log("[SmartSeat Scanner] QR code visually detected by camera! Raw length:", decodedText?.length, "Preview:", preview);
             await handleProcessToken(decodedText);
           },
           () => {}
         );
       } catch (primaryErr: any) {
-        console.warn("Primary camera start failed, attempting user-facing camera fallback:", primaryErr);
+        console.warn("[SmartSeat Camera] Primary camera start failed, attempting user-facing camera fallback:", primaryErr);
         // Fallback to front/user-facing camera if rear camera or specific device id was rejected
         await html5QrCode.start(
           { facingMode: "user" },
           config,
           async (decodedText) => {
+            const preview = decodedText ? (decodedText.length > 16 ? decodedText.slice(0, 10) + "..." + decodedText.slice(-6) : decodedText) : "empty";
+            console.log("[SmartSeat Scanner] QR code detected on fallback camera! Raw length:", decodedText?.length, "Preview:", preview);
             await handleProcessToken(decodedText);
           },
           () => {}
@@ -284,6 +277,9 @@ export default function GateScannerPage() {
     setSubmitting(true);
     setLastDetectedAt(new Date().toLocaleTimeString());
 
+    const preview = token.length > 16 ? token.slice(0, 10) + "..." + token.slice(-6) : token;
+    console.log("[SmartSeat Scanner] Processing detected token. Length:", token.length, "Preview:", preview);
+
     // Instant tactile and sound response the split-second QR is captured
     soundManager.playSuccessTone();
     soundManager.triggerVibration([100]);
@@ -299,6 +295,7 @@ export default function GateScannerPage() {
         headers["Authorization"] = `Bearer ${session.access_token}`;
       }
 
+      console.log("[SmartSeat Scanner] Dispatching validation request to /api/scan/entry...");
       const res = await fetch("/api/scan/entry", {
         method: "POST",
         headers,
@@ -306,6 +303,7 @@ export default function GateScannerPage() {
       });
 
       const resJson: ScanResult = await res.json();
+      console.log("[SmartSeat Scanner] /api/scan/entry result: status=" + res.status + ", success=" + resJson.success + ", reason=" + (resJson.reasonCode || "OK"));
       setScanResult(resJson);
 
       if (res.ok && resJson.success) {
@@ -317,6 +315,7 @@ export default function GateScannerPage() {
         soundManager.triggerVibration([400]);
       }
     } catch (err: any) {
+      console.error("[SmartSeat Scanner] Network failure contacting /api/scan/entry:", err);
       setScanResult({
         success: false,
         reasonCode: "NETWORK_ERROR",
@@ -608,7 +607,8 @@ export default function GateScannerPage() {
         #${qrRegionId} video {
           width: 100% !important;
           height: 100% !important;
-          object-fit: cover !important;
+          object-fit: contain !important;
+          background: #000000 !important;
           border-radius: 1rem !important;
           display: block !important;
         }

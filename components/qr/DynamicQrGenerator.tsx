@@ -81,10 +81,11 @@ export function DynamicQrGenerator({
       // Render high-contrast QR code as SVG
       const svg = await QRCode.toString(ticketJson.token, {
         type: "svg",
-        margin: 1,
+        errorCorrectionLevel: "M",
+        margin: 4,
         color: {
-          dark: "#0f172a", // deep slate
-          light: "#ffffff", // crisp white
+          dark: "#000000",
+          light: "#ffffff",
         },
       });
       setQrSvg(svg);
@@ -228,15 +229,10 @@ export function DynamicQrGenerator({
               </div>
             ) : (
               <div
-                className="w-60 h-60 flex items-center justify-center transition-opacity duration-300"
+                className="w-64 h-64 flex items-center justify-center transition-opacity duration-300"
                 dangerouslySetInnerHTML={{ __html: qrSvg }}
               />
             )}
-
-            {/* Corner Badge */}
-            <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-slate-900/90 text-[9px] font-mono font-bold text-slate-200">
-              HMAC-30s
-            </div>
           </div>
 
           {/* Countdown Timer with SVG Ring */}

@@ -91,11 +91,11 @@ export default function SecureTicketPage({
       // Render high-contrast QR code as SVG data URL (UPI-standard dark modules on crisp white)
       const svg = await QRCode.toString(ticketJson.token, {
         type: "svg",
-        errorCorrectionLevel: "L",
-        margin: 2,
+        errorCorrectionLevel: "M",
+        margin: 4,
         color: {
-          dark: "#0a0f1d", // rich dark slate/black
-          light: "#ffffff", // solid white quiet zone
+          dark: "#000000", // pure solid black modules for instant camera contrast
+          light: "#ffffff", // solid white quiet zone per ISO/IEC 18004
         },
       });
       setQrSvg(svg);
@@ -359,10 +359,10 @@ export default function SecureTicketPage({
 
         {/* Dynamic QR Presentation with Countdown Ring (UPI-Style Standee Card) */}
         <div className="relative flex flex-col items-center justify-center p-6 rounded-3xl bg-slate-900/90 border border-slate-800 space-y-4">
-          <div className="relative w-64 h-64 flex items-center justify-center bg-white rounded-3xl p-4 shadow-2xl border-4 border-indigo-500/20">
+          <div className="relative w-72 h-72 flex items-center justify-center bg-white rounded-3xl p-5 shadow-2xl border-4 border-indigo-500/20">
             {qrSvg ? (
               <div
-                className="w-full h-full [&>svg]:w-full [&>svg]:h-full rounded-2xl overflow-hidden"
+                className="w-full h-full [&>svg]:w-full [&>svg]:h-full"
                 dangerouslySetInnerHTML={{ __html: qrSvg }}
               />
             ) : (

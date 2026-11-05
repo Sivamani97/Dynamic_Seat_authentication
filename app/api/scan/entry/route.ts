@@ -84,6 +84,8 @@ export async function POST(request: NextRequest) {
 
   let token = parseResult.data.token.trim();
   const { eventId } = parseResult.data;
+  const tokenPreview = token.length > 16 ? token.slice(0, 8) + "..." + token.slice(-6) : token;
+  console.log(`[Gate Scan API] Request received. Actor: ${user.role}, TurnstileScanner: ${isTurnstileScanner}, Token: [${tokenPreview}], Len: ${token.length}`);
 
   // 2.1 Smart URL normalization: extract raw token if a full URL was scanned
   try {
@@ -92,10 +94,12 @@ export async function POST(request: NextRequest) {
       const qToken = u.searchParams.get("token");
       if (qToken) {
         token = qToken.trim();
+        console.log(`[Gate Scan API] Normalized token extracted from query param: [${token.slice(0, 8)}...]`);
       } else {
         const m = u.pathname.match(/\/t\/([^/?#]+)/);
         if (m && m[1]) {
           token = m[1].trim();
+          console.log(`[Gate Scan API] Normalized token extracted from ticket path: [${token.slice(0, 8)}...]`);
         }
       }
     }
@@ -228,6 +232,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  console.log(`[Gate Scan API] Booking located: Ref=${booking.booking_ref}, Seat=${(booking.seat as any)?.label || booking.seat_id}, Status=${booking.status}`);
+
   // 5. Cryptographically Verify Signature and Expiration (+-180s clock skew)
   let verifyResult = verifyDynamicToken(token, booking.booking_secret, {
     clockSkewSec: 180,
@@ -240,8 +246,11 @@ export async function POST(request: NextRequest) {
     });
     if (sessionVerify.valid && sessionVerify.payload) {
       verifyResult = sessionVerify;
+      console.log(`[Gate Scan API] Token accepted via active session fallback (+86400s skew)`);
     }
   }
+
+  console.log(`[Gate Scan API] Cryptographic check: Valid=${verifyResult.valid}, Reason=${verifyResult.reasonCode || "NONE"}`);
 
   if (!verifyResult.valid || !verifyResult.payload) {
     await logAuditEvent(supabase, {

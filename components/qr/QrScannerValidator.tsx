@@ -143,23 +143,13 @@ export function QrScannerValidator({
       }
 
       const html5QrCode = new Html5Qrcode(qrRegionId, {
-        experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true,
-        },
         verbose: false,
       });
       scannerRef.current = html5QrCode;
 
+      // Full-frame scanning without restrictive qrbox crop distortion
       const config = {
-        fps: 20,
-        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const w = viewfinderWidth || 300;
-          const h = viewfinderHeight || 300;
-          const minEdge = Math.min(w, h);
-          const size = Math.max(200, Math.floor(minEdge * 0.85));
-          return { width: size, height: size };
-        },
-        aspectRatio: 1.0,
+        fps: 24,
       };
 
       try {
@@ -167,16 +157,20 @@ export function QrScannerValidator({
           cameraTarget,
           config,
           async (decodedText) => {
+            const preview = decodedText ? (decodedText.length > 16 ? decodedText.slice(0, 10) + "..." + decodedText.slice(-6) : decodedText) : "empty";
+            console.log("[Modular Scanner] QR code detected by camera! Raw length:", decodedText?.length, "Preview:", preview);
             await handleProcessToken(decodedText);
           },
           () => {}
         );
       } catch (firstErr: any) {
-        console.warn("Target camera start failed, attempting user camera fallback:", firstErr);
+        console.warn("[Modular Scanner] Target camera start failed, attempting user camera fallback:", firstErr);
         await html5QrCode.start(
           { facingMode: "user" },
           config,
           async (decodedText) => {
+            const preview = decodedText ? (decodedText.length > 16 ? decodedText.slice(0, 10) + "..." + decodedText.slice(-6) : decodedText) : "empty";
+            console.log("[Modular Scanner] QR code detected on fallback camera! Raw length:", decodedText?.length, "Preview:", preview);
             await handleProcessToken(decodedText);
           },
           () => {}
