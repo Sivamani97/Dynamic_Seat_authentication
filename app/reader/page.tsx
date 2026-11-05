@@ -16,6 +16,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { soundManager } from "@/lib/audio";
+import { createClient } from "@/lib/supabase/client";
 
 interface ScanResult {
   success: boolean;
@@ -207,11 +208,18 @@ export default function DynamicQrReaderPage() {
     setSubmitting(true);
 
     try {
+      const supabase = createClient();
+      const session = (await supabase.auth.getSession()).data.session;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+
       if (readerMode === "GATE") {
         // Gate Turnstile Verification
         const res = await fetch("/api/scan/entry", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             token: cleanToken,
           }),

@@ -91,6 +91,7 @@ export default function SecureTicketPage({
       // Render high-contrast QR code as SVG data URL (UPI-standard dark modules on crisp white)
       const svg = await QRCode.toString(ticketJson.token, {
         type: "svg",
+        errorCorrectionLevel: "L",
         margin: 2,
         color: {
           dark: "#0a0f1d", // rich dark slate/black

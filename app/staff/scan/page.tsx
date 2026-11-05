@@ -20,6 +20,7 @@ import {
   SwitchCamera,
 } from "lucide-react";
 import { soundManager } from "@/lib/audio";
+import { createClient } from "@/lib/supabase/client";
 
 interface ScanResult {
   success: boolean;
@@ -49,6 +50,48 @@ export default function GateScannerPage() {
   const [countdownSec, setCountdownSec] = useState<number>(0);
   const [availableCameras, setAvailableCameras] = useState<Array<{ id: string; label: string }>>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+  const [currentEmail, setCurrentEmail] = useState<string | null>(null);
+  const [switchingRole, setSwitchingRole] = useState<boolean>(false);
+
+  useEffect(() => {
+    async function checkRole() {
+      try {
+        const res = await fetch("/api/auth/me");
+        const json = await res.json();
+        if (json.authenticated && json.user) {
+          setCurrentUserRole(json.user.role);
+          setCurrentEmail(json.user.email);
+        } else {
+          setCurrentUserRole("ANONYMOUS");
+        }
+      } catch {
+        setCurrentUserRole("ANONYMOUS");
+      }
+    }
+    checkRole();
+  }, []);
+
+  const handleQuickStaffLogin = async () => {
+    setSwitchingRole(true);
+    try {
+      const supabase = createClient();
+      await supabase.auth.signInWithPassword({
+        email: "staff@demo.com",
+        password: "Staff@123",
+      });
+      const res = await fetch("/api/auth/me");
+      const json = await res.json();
+      if (json.authenticated && json.user) {
+        setCurrentUserRole(json.user.role);
+        setCurrentEmail(json.user.email);
+      }
+    } catch (e) {
+      console.error("Staff sign-in failed:", e);
+    } finally {
+      setSwitchingRole(false);
+    }
+  };
 
   const qrRegionId = "html5qr-code-full-region";
   const scannerRef = useRef<Html5Qrcode | null>(null);
@@ -120,16 +163,21 @@ export default function GateScannerPage() {
         setSelectedCameraId(chosen.id);
       }
 
-      const html5QrCode = new Html5Qrcode(qrRegionId);
+      const html5QrCode = new Html5Qrcode(qrRegionId, {
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true,
+        },
+        verbose: false,
+      });
       scannerRef.current = html5QrCode;
 
       const config = {
         fps: 20,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const w = viewfinderWidth || 300;
-          const h = viewfinderHeight || 300;
+          const w = viewfinderWidth || 320;
+          const h = viewfinderHeight || 320;
           const minEdge = Math.min(w, h);
-          const size = Math.max(180, Math.floor(minEdge * 0.72));
+          const size = Math.max(200, Math.floor(minEdge * 0.85));
           return {
             width: size,
             height: size,
@@ -241,9 +289,16 @@ export default function GateScannerPage() {
     soundManager.triggerVibration([100]);
 
     try {
+      const supabase = createClient();
+      const session = (await supabase.auth.getSession()).data.session;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+
       const res = await fetch("/api/scan/entry", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ token }),
       });
 
@@ -306,6 +361,35 @@ export default function GateScannerPage() {
           Point camera at passenger ticket. Instantly decodes, validates credentials, retrieves passenger info, and synchronizes database status in real-time.
         </p>
       </div>
+
+      {/* Staff Authentication Status Banner */}
+      {currentUserRole && currentUserRole !== "STAFF" && currentUserRole !== "ADMIN" && (
+        <div className="p-4 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs space-y-2.5 animate-in fade-in">
+          <div className="flex items-center gap-2 font-bold text-amber-300">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              {currentUserRole === "USER"
+                ? `Currently Logged in as Passenger (${currentEmail})`
+                : "Staff Sign-In Required"}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-300 leading-relaxed">
+            Turnstile gate verification requires authorized Staff credentials. If you are testing, click below to quickly authenticate as Staff.
+          </p>
+          <button
+            onClick={handleQuickStaffLogin}
+            disabled={switchingRole}
+            className="w-full sm:w-auto px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-98"
+          >
+            {switchingRole ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <ShieldCheck className="w-3.5 h-3.5" />
+            )}
+            <span>Switch to Staff Account (staff@demo.com)</span>
+          </button>
+        </div>
+      )}
 
       {/* Submitting Loading Overlay */}
       {submitting && (

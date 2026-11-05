@@ -77,12 +77,12 @@ export async function POST(request: NextRequest) {
     }
   } catch {}
 
-  // Bridge ticket link token: if ticket_link_token was scanned, generate a fresh active token
-  if (token.startsWith("tok_")) {
+  // Bridge ticket link token or booking ref: if not a full dot-separated JWT, resolve booking and generate dynamic token
+  if (!token.includes(".") || token.startsWith("tok_")) {
     const { data: bData } = await supabase
       .from("bookings")
       .select("id, seat_id, event_id, booking_secret")
-      .eq("ticket_link_token", token)
+      .or(`ticket_link_token.eq.${token},booking_ref.eq.${token}`)
       .maybeSingle();
 
     if (bData) {

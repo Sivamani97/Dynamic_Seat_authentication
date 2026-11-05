@@ -20,6 +20,7 @@ import {
   Flashlight,
 } from "lucide-react";
 import { soundManager } from "@/lib/audio";
+import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 
 export interface ScanResult {
@@ -141,16 +142,21 @@ export function QrScannerValidator({
         }
       }
 
-      const html5QrCode = new Html5Qrcode(qrRegionId);
+      const html5QrCode = new Html5Qrcode(qrRegionId, {
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true,
+        },
+        verbose: false,
+      });
       scannerRef.current = html5QrCode;
 
       const config = {
         fps: 20,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const w = viewfinderWidth || 280;
-          const h = viewfinderHeight || 280;
+          const w = viewfinderWidth || 300;
+          const h = viewfinderHeight || 300;
           const minEdge = Math.min(w, h);
-          const size = Math.max(180, Math.floor(minEdge * 0.72));
+          const size = Math.max(200, Math.floor(minEdge * 0.85));
           return { width: size, height: size };
         },
         aspectRatio: 1.0,
@@ -230,11 +236,18 @@ export function QrScannerValidator({
     setSubmitting(true);
 
     try {
+      const supabase = createClient();
+      const session = (await supabase.auth.getSession()).data.session;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+
       if (readerMode === "GATE") {
         // Gate Turnstile Verification
         const res = await fetch("/api/scan/entry", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             token: cleanToken,
           }),
@@ -255,7 +268,7 @@ export function QrScannerValidator({
         const unitSecret = `smartseat_secret_${selectedSeatUnit}`;
         const res = await fetch("/api/scan/seat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             token: cleanToken,
             unitId: selectedSeatUnit,
